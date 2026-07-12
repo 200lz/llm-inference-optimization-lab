@@ -38,6 +38,8 @@ class BenchmarkConfig:
     warmup_runs: int
     timeout_seconds: float
     output_directory: Path
+    mmap: bool = True
+    cpu_only: bool = True
     smoke_fixture: Path | None = None
 
 
@@ -78,7 +80,7 @@ def load_config(path: Path) -> BenchmarkConfig:
         "batch_sizes", "context_sizes", "repetitions", "warmup_runs",
         "timeout_seconds", "output_directory",
     }
-    optional = {"smoke_fixture"}
+    optional = {"smoke_fixture", "mmap", "cpu_only"}
     missing = sorted(required - raw.keys())
     unknown = sorted(raw.keys() - required - optional)
     if missing:
@@ -103,6 +105,9 @@ def load_config(path: Path) -> BenchmarkConfig:
     smoke = raw.get("smoke_fixture")
     if smoke is not None and (not isinstance(smoke, str) or not smoke.strip()):
         raise ConfigError("smoke_fixture must be a non-empty path string")
+    for key in ("mmap", "cpu_only"):
+        if key in raw and type(raw[key]) is not bool:
+            raise ConfigError(f"{key} must be a boolean")
     return BenchmarkConfig(
         executable=path_value("executable"), model=path_value("model"),
         threads=_positive_list(raw, "threads"),
@@ -112,6 +117,7 @@ def load_config(path: Path) -> BenchmarkConfig:
         context_sizes=_positive_list(raw, "context_sizes"),
         repetitions=raw["repetitions"], warmup_runs=raw["warmup_runs"],
         timeout_seconds=float(timeout), output_directory=path_value("output_directory"),
+        mmap=raw.get("mmap", True), cpu_only=raw.get("cpu_only", True),
         smoke_fixture=((path.parent / smoke).resolve() if smoke and not Path(smoke).is_absolute() else Path(smoke) if smoke else None),
     )
 
@@ -134,11 +140,15 @@ def cases(config: BenchmarkConfig) -> Iterable[Case]:
 def build_command(config: BenchmarkConfig, case: Case) -> list[str]:
     """Construct an argv list; no value is interpreted by a shell."""
     depth = case.context_size - case.prompt_tokens - case.generated_tokens
-    return [
+    command = [
         str(config.executable), "-m", str(config.model), "-t", str(case.threads),
         "-p", str(case.prompt_tokens), "-n", str(case.generated_tokens),
         "-b", str(case.batch_size), "-d", str(depth), "-r", "1",
+        "-o", "md", "-mmp", "1" if config.mmap else "0",
     ]
+    if config.cpu_only:
+        command.extend(["-ngl", "0", "-dev", "none"])
+    return command
 
 
 def _version(command: Sequence[str]) -> str | None:
@@ -214,7 +224,7 @@ def parse_llama_bench(stdout: str) -> list[dict[str, Any]]:
     combined: dict[tuple[str, str, str, str], dict[str, Any]] = {}
     for row in table:
         test = row.get("test", "")
-        match = re.fullmatch(r"(pp|tg)(\d+)", test)
+        match = re.fullmatch(r"(pp|tg)(\d+)(?: @ d\d+)?", test)
         if not match:
             continue
         key = (row.get("model", ""), row.get("backend", ""), row.get("threads", ""), row.get("size", ""))

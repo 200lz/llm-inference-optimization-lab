@@ -28,6 +28,7 @@ Testing/
 models/
 
 # Generated benchmark results
+benchmarks/results/
 results/*
 !results/.gitkeep
 !results/README.md

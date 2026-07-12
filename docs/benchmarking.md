@@ -2,7 +2,7 @@
 
 The Phase 1 harness executes `llama-bench` once for every Cartesian product of the configured thread, prompt-token, generated-token, batch-size, and context-size values. Each command is an argument vector passed directly to `subprocess`; no shell parses paths or values.
 
-The pinned `llama-bench` has no direct context-size option. Its context allocation is prompt tokens plus generated tokens plus `--n-depth`, so the harness translates a configured total context size to `n_depth = context - prompt - generated`. Configurations where the workload cannot fit in the requested context are rejected. The additional depth test emitted by `llama-bench` is retained in raw output but is not one of the normalized prompt-processing or generation metrics.
+The pinned `llama-bench` has no direct context-size option. Its context allocation is prompt tokens plus generated tokens plus `--n-depth`, so the harness translates a configured total context size to `n_depth = context - prompt - generated`. Configurations where the workload cannot fit in the requested context are rejected. The additional depth test emitted by `llama-bench` is retained in raw output but is not one of the normalized prompt-processing or generation metrics. CPU-only configurations pass `--n-gpu-layers 0` and `--device none`; mmap is also passed explicitly.
 
 ## Metrics
 

@@ -53,7 +53,15 @@ def test_command_construction_is_an_argv_list(tmp_path: Path) -> None:
     assert command == [
         "/path with spaces/llama-bench", "-m", "/model with spaces.gguf", "-t", "4",
         "-p", "128", "-n", "32", "-b", "64", "-d", "352", "-r", "1",
+        "-o", "md", "-mmp", "1", "-ngl", "0", "-dev", "none",
     ]
+
+
+def test_pinned_cpu_options_can_be_configured(tmp_path: Path) -> None:
+    config = write_config(tmp_path, mmap="false", cpu_only="false")
+    command = harness.build_command(config, harness.Case(4, 128, 32, 64, 512))
+    assert command[-2:] == ["-mmp", "0"]
+    assert "-ngl" not in command
 
 
 def test_context_must_fit_workload(tmp_path: Path) -> None:
@@ -70,6 +78,14 @@ def test_successful_output_parsing() -> None:
         "prompt_tokens_per_second": 100.0, "generation_tokens_per_second": 20.0,
         "test_identifier": "pp128+tg32",
     }]
+
+
+def test_pinned_depth_suffix_is_parsed() -> None:
+    output = (FIXTURES / "llama_bench_success.txt").read_text(encoding="utf-8")
+    output = output.replace("pp128", "pp128 @ d832").replace("tg32", "tg32 @ d832")
+    rows = harness.parse_llama_bench(output)
+    assert rows[0]["prompt_tokens"] == 128
+    assert rows[0]["generated_tokens"] == 32
 
 
 def test_malformed_output_handling() -> None:

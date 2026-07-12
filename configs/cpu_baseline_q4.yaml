@@ -1,0 +1,13 @@
+executable: ../third_party/llama.cpp/build-release/bin/llama-bench
+model: ../models/qwen2.5-0.5b-instruct-q4_k_m.gguf
+threads: [1, 2, 4]
+prompt_tokens: [128, 512]
+generated_tokens: [64]
+batch_sizes: [512]
+context_sizes: [1024]
+repetitions: 5
+warmup_runs: 1
+timeout_seconds: 900
+output_directory: ../benchmarks/results/cpu_baseline_q4
+mmap: true
+cpu_only: true
