@@ -1,0 +1,12 @@
+executable: ../third_party/llama.cpp/build/bin/llama-bench
+model: ../models/not-required-in-smoke-mode.gguf
+threads: [4]
+prompt_tokens: [128]
+generated_tokens: [32]
+batch_sizes: [128]
+context_sizes: [512]
+repetitions: 2
+warmup_runs: 1
+timeout_seconds: 60
+output_directory: ../results/smoke
+smoke_fixture: ../tests/fixtures/llama_bench_success.txt

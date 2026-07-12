@@ -1,0 +1,11 @@
+executable: ../third_party/llama.cpp/build/bin/llama-bench
+model: ../models/model.gguf
+threads: [1, 4, 8]
+prompt_tokens: [128, 512]
+generated_tokens: [32, 128]
+batch_sizes: [128, 512]
+context_sizes: [2048, 4096]
+repetitions: 5
+warmup_runs: 1
+timeout_seconds: 600
+output_directory: ../results/cpu-baseline

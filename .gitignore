@@ -33,6 +33,7 @@ results/*
 !results/README.md
 *.benchmark.json
 *.benchmark.csv
+benchmark-results/
 
 # llama.cpp build and generated outputs
 third_party/llama.cpp/build/

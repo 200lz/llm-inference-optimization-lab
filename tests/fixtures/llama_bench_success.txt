@@ -1,0 +1,4 @@
+| model                          |       size |     params | backend    | threads |          test |                  t/s |
+| ------------------------------ | ---------: | ---------: | ---------- | ------: | ------------: | -------------------: |
+| deterministic-fixture          |   1.23 GiB |     2.00 B | CPU        |       4 |         pp128 |       100.00 ± 1.00 |
+| deterministic-fixture          |   1.23 GiB |     2.00 B | CPU        |       4 |          tg32 |        20.00 ± 0.50 |
