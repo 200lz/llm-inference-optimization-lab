@@ -1,0 +1,45 @@
+# Python environments and caches
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+
+# CMake and native build outputs
+build/
+build-*/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+compile_commands.json
+Testing/
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Models
+*.gguf
+models/
+
+# Generated benchmark results
+results/*
+!results/.gitkeep
+!results/README.md
+*.benchmark.json
+*.benchmark.csv
+
+# llama.cpp build and generated outputs
+third_party/llama.cpp/build/
+third_party/llama.cpp/build-*/
+third_party/llama.cpp/bin/
+third_party/llama.cpp/*.gguf
+
+# Platform noise
+.DS_Store
+Thumbs.db

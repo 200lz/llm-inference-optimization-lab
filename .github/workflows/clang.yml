@@ -1,0 +1,22 @@
+name: Ubuntu Clang
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    env:
+      CC: clang
+      CXX: clang++
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Configure
+        run: cmake -S . -B build/clang -G Ninja -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON
+      - name: Build
+        run: cmake --build build/clang
+      - name: Test
+        run: ctest --test-dir build/clang --output-on-failure
