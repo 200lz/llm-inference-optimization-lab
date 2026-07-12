@@ -53,14 +53,14 @@ def test_command_construction_is_an_argv_list(tmp_path: Path) -> None:
     assert command == [
         "/path with spaces/llama-bench", "-m", "/model with spaces.gguf", "-t", "4",
         "-p", "128", "-n", "32", "-b", "64", "-ub", "512", "-d", "352", "-r", "1",
-        "-o", "md", "-mmp", "1", "-ngl", "0", "-dev", "none",
+        "-o", "md", "-mmp", "1", "-ctk", "f16", "-ctv", "f16", "-ngl", "0", "-dev", "none",
     ]
 
 
 def test_pinned_cpu_options_can_be_configured(tmp_path: Path) -> None:
     config = write_config(tmp_path, mmap="false", cpu_only="false")
     command = harness.build_command(config, harness.Case(4, 128, 32, 64, 512))
-    assert command[-2:] == ["-mmp", "0"]
+    assert command[-6:] == ["-mmp", "0", "-ctk", "f16", "-ctv", "f16"]
     assert "-ngl" not in command
 
 

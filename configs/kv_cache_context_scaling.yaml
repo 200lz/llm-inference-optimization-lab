@@ -1,0 +1,37 @@
+executable: ../third_party/llama.cpp/build-release/bin/llama-bench
+models:
+  - {id: qwen2.5-0.5b-instruct-q4_k_m, path: ../models/qwen2.5-0.5b-instruct-q4_k_m.gguf, quantization: Q4_K_M, sha256: 74a4da8c9fdbcd15bd1f6d01d621410d31c6fc00986f5eb687824e7b93d7a9db, byte_size: 491400032}
+threads: [4]
+prompt_tokens: [256]
+generated_tokens: [32]
+batch_sizes: [512]
+ubatch_sizes: [512]
+context_sizes: [512]
+kv_cache_variants:
+  - {key: f16, value: f16}
+  - {key: q8_0, value: q8_0}
+  - {key: q4_0, value: q4_0}
+repetitions: 5
+warmup_runs: 1
+timeout_seconds: 900
+output_directory: ../benchmarks/results/kv_cache_context_scaling
+mmap: true
+cpu_only: true
+measure_memory: true
+explicit_cases:
+  # A: actual prompt and allocated context grow together.
+  - {threads: 4, prompt_tokens: 256, generated_tokens: 32, batch_size: 512, ubatch_size: 512, context_size: 512}
+  - {threads: 4, prompt_tokens: 768, generated_tokens: 32, batch_size: 512, ubatch_size: 512, context_size: 1024}
+  - {threads: 4, prompt_tokens: 1536, generated_tokens: 32, batch_size: 512, ubatch_size: 512, context_size: 2048}
+  - {threads: 4, prompt_tokens: 3072, generated_tokens: 32, batch_size: 512, ubatch_size: 512, context_size: 4096}
+  # B: fixed active workload, increasing allocated context.
+  - {threads: 4, prompt_tokens: 256, generated_tokens: 64, batch_size: 512, ubatch_size: 512, context_size: 512}
+  - {threads: 4, prompt_tokens: 256, generated_tokens: 64, batch_size: 512, ubatch_size: 512, context_size: 1024}
+  - {threads: 4, prompt_tokens: 256, generated_tokens: 64, batch_size: 512, ubatch_size: 512, context_size: 2048}
+  - {threads: 4, prompt_tokens: 256, generated_tokens: 64, batch_size: 512, ubatch_size: 512, context_size: 4096}
+  # C: active decode sequence growth.
+  - {threads: 4, prompt_tokens: 512, generated_tokens: 16, batch_size: 512, ubatch_size: 512, context_size: 4096}
+  - {threads: 4, prompt_tokens: 512, generated_tokens: 64, batch_size: 512, ubatch_size: 512, context_size: 4096}
+  - {threads: 4, prompt_tokens: 512, generated_tokens: 128, batch_size: 512, ubatch_size: 512, context_size: 4096}
+  - {threads: 4, prompt_tokens: 512, generated_tokens: 256, batch_size: 512, ubatch_size: 512, context_size: 4096}
+

@@ -46,6 +46,9 @@ class BenchmarkConfig:
     smoke_fixture: Path | None = None
     explicit_cases: tuple[Case, ...] | None = None
     models: tuple[ModelSpec, ...] = ()
+    kv_cache_variants: tuple[tuple[str, str], ...] = (("f16", "f16"),)
+    measure_memory: bool = False
+    time_executable: Path = Path("/usr/bin/time")
 
 
 @dataclass(frozen=True)
@@ -65,6 +68,11 @@ class Case:
     batch_size: int
     context_size: int
     ubatch_size: int = 512
+    kv_key_type: str = "f16"
+    kv_value_type: str = "f16"
+
+
+SUPPORTED_KV_CACHE_TYPES = frozenset({"f32", "f16", "bf16", "q8_0", "q4_0", "q4_1", "iq4_nl", "q5_0", "q5_1"})
 
 
 CSV_FIELDS = (
@@ -72,7 +80,8 @@ CSV_FIELDS = (
     "model_sha256", "model_file_size", "invocation_id", "model_name", "model_size", "backend", "thread_count",
     "prompt_tokens", "generated_tokens", "prompt_tokens_per_second",
     "generation_tokens_per_second", "test_identifier", "batch_size",
-    "ubatch_size", "context_size", "repetition", "elapsed_seconds",
+    "ubatch_size", "context_size", "kv_key_type", "kv_value_type", "repetition", "elapsed_seconds",
+    "peak_rss_kib", "reported_kv_cache_bytes", "memory_measurement_source", "mmap_enabled",
 )
 
 
@@ -119,7 +128,8 @@ def load_config(path: Path) -> BenchmarkConfig:
         "batch_sizes", "context_sizes", "repetitions", "warmup_runs",
         "timeout_seconds", "output_directory",
     }
-    optional = {"model", "models", "smoke_fixture", "mmap", "cpu_only", "explicit_cases", "ubatch_sizes"}
+    optional = {"model", "models", "smoke_fixture", "mmap", "cpu_only", "explicit_cases", "ubatch_sizes",
+                "kv_cache_variants", "measure_memory", "time_executable"}
     missing = sorted(required - raw.keys())
     unknown = sorted(raw.keys() - required - optional)
     if missing:
@@ -146,7 +156,7 @@ def load_config(path: Path) -> BenchmarkConfig:
     smoke = raw.get("smoke_fixture")
     if smoke is not None and (not isinstance(smoke, str) or not smoke.strip()):
         raise ConfigError("smoke_fixture must be a non-empty path string")
-    for key in ("mmap", "cpu_only"):
+    for key in ("mmap", "cpu_only", "measure_memory"):
         if key in raw and type(raw[key]) is not bool:
             raise ConfigError(f"{key} must be a boolean")
     ubatches = _positive_list(raw, "ubatch_sizes") if "ubatch_sizes" in raw else (512,)
@@ -164,6 +174,24 @@ def load_config(path: Path) -> BenchmarkConfig:
                 raise ConfigError(f"explicit_cases[{index}] values must be positive integers")
             built.append(Case(**entry))
         explicit = tuple(built)
+    variants_raw = raw.get("kv_cache_variants", [{"key": "f16", "value": "f16"}])
+    if not isinstance(variants_raw, list) or not variants_raw:
+        raise ConfigError("kv_cache_variants must be a non-empty list")
+    variants: list[tuple[str, str]] = []
+    for index, variant in enumerate(variants_raw):
+        if not isinstance(variant, dict) or set(variant) != {"key", "value"}:
+            raise ConfigError(f"kv_cache_variants[{index}] must contain exactly key and value")
+        pair = (variant["key"], variant["value"])
+        if any(not isinstance(value, str) or value not in SUPPORTED_KV_CACHE_TYPES for value in pair):
+            raise ConfigError(f"kv_cache_variants[{index}] contains an unknown KV-cache type")
+        if pair in variants:
+            raise ConfigError(f"duplicate KV-cache variant: {pair[0]}/{pair[1]}")
+        variants.append(pair)
+    time_value = raw.get("time_executable", "/usr/bin/time")
+    if not isinstance(time_value, str) or not time_value.strip():
+        raise ConfigError("time_executable must be a non-empty path string")
+    time_path = Path(time_value).expanduser()
+    time_path = time_path if time_path.is_absolute() else (path.parent / time_path).resolve()
     model_specs: tuple[ModelSpec, ...]
     if "models" in raw:
         entries = raw["models"]
@@ -207,6 +235,8 @@ def load_config(path: Path) -> BenchmarkConfig:
         smoke_fixture=((path.parent / smoke).resolve() if smoke and not Path(smoke).is_absolute() else Path(smoke) if smoke else None),
         explicit_cases=explicit,
         models=model_specs,
+        kv_cache_variants=tuple(variants), measure_memory=raw.get("measure_memory", False),
+        time_executable=time_path,
     )
 
 
@@ -216,6 +246,9 @@ def cases(config: BenchmarkConfig) -> Iterable[Case]:
         config.batch_sizes, config.context_sizes, config.ubatch_sizes,
     )]
     result = list(dict.fromkeys(result))
+    result = [Case(case.threads, case.prompt_tokens, case.generated_tokens, case.batch_size,
+                   case.context_size, case.ubatch_size, key, value)
+              for case in result for key, value in config.kv_cache_variants]
     invalid = [case for case in result if case.context_size < case.prompt_tokens + case.generated_tokens]
     if invalid:
         case = invalid[0]
@@ -234,6 +267,7 @@ def build_command(config: BenchmarkConfig, case: Case, model: ModelSpec | None =
         "-p", str(case.prompt_tokens), "-n", str(case.generated_tokens),
         "-b", str(case.batch_size), "-ub", str(case.ubatch_size), "-d", str(depth), "-r", "1",
         "-o", "md", "-mmp", "1" if config.mmap else "0",
+        "-ctk", case.kv_key_type, "-ctv", case.kv_value_type,
     ]
     if config.cpu_only:
         command.extend(["-ngl", "0", "-dev", "none"])
@@ -309,6 +343,30 @@ def execute(command: Sequence[str], timeout: float) -> dict[str, Any]:
                 "elapsed_seconds": time.perf_counter() - started, "timed_out": False}
 
 
+def parse_time_verbose(stderr: str) -> int | None:
+    """Return GNU time maximum RSS in KiB, or None for missing/malformed output."""
+    match = re.search(r"^\s*Maximum resident set size \(kbytes\):\s*([^\s]+)\s*$", stderr, re.MULTILINE)
+    if not match:
+        return None
+    try:
+        value = int(match.group(1))
+    except ValueError:
+        return None
+    return value if value >= 0 else None
+
+
+def parse_kv_cache_bytes(text: str) -> int | None:
+    """Parse pinned llama.cpp's informational `KV buffer size = N unit` lines."""
+    values = []
+    units = {"KiB": 1024, "MiB": 1024**2, "GiB": 1024**3}
+    for number, unit in re.findall(r"KV buffer size\s*=\s*([0-9]+(?:\.[0-9]+)?)\s*(KiB|MiB|GiB)", text):
+        try:
+            values.append(round(float(number) * units[unit]))
+        except (ValueError, OverflowError):
+            continue
+    return sum(values) if values else None
+
+
 def parse_llama_bench(stdout: str) -> list[dict[str, Any]]:
     """Parse llama-bench's stable Markdown table output and combine pp/tg rows."""
     table: list[dict[str, str]] = []
@@ -366,7 +424,8 @@ def write_results(raw_path: Path, csv_path: Path, records: Sequence[Mapping[str,
 
 
 def case_id(case: Case) -> str:
-    return f"p{case.prompt_tokens}-n{case.generated_tokens}-t{case.threads}-b{case.batch_size}-ub{case.ubatch_size}-c{case.context_size}"
+    return (f"p{case.prompt_tokens}-n{case.generated_tokens}-t{case.threads}-b{case.batch_size}-"
+            f"ub{case.ubatch_size}-c{case.context_size}-kv-{case.kv_key_type}-{case.kv_value_type}")
 
 
 def _models(config: BenchmarkConfig) -> tuple[ModelSpec, ...]:
@@ -407,7 +466,8 @@ def config_fingerprint(config: BenchmarkConfig) -> str:
         "executable": str(config.executable), "models": [asdict(model) | {"path": str(model.path)} for model in _models(config)],
         "cases": [asdict(case) for case in cases(config)], "repetitions": config.repetitions,
         "warmup_runs": config.warmup_runs, "timeout_seconds": config.timeout_seconds,
-        "mmap": config.mmap, "cpu_only": config.cpu_only,
+        "mmap": config.mmap, "cpu_only": config.cpu_only, "measure_memory": config.measure_memory,
+        "time_executable": str(config.time_executable),
     }
     return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
 
@@ -466,6 +526,12 @@ def normalized_records(records: Sequence[Mapping[str, Any]]) -> list[dict[str, A
                                "invocation_id": record.get("invocation_id"),
                                "batch_size": case["batch_size"], "ubatch_size": case["ubatch_size"],
                                "context_size": case["context_size"],
+                               "kv_key_type": case.get("kv_key_type", "f16"),
+                               "kv_value_type": case.get("kv_value_type", "f16"),
+                               "peak_rss_kib": record.get("peak_rss_kib"),
+                               "reported_kv_cache_bytes": record.get("reported_kv_cache_bytes"),
+                               "memory_measurement_source": record.get("memory_measurement_source"),
+                               "mmap_enabled": record.get("mmap_enabled"),
                                "repetition": record["repetition"], "elapsed_seconds": record["elapsed_seconds"]})
     return normalized
 
@@ -537,9 +603,11 @@ def run(config: BenchmarkConfig, project_root: Path, smoke: bool = False,
                       f"elapsed={elapsed:.1f}s", flush=True)
                 started_at = datetime.now(timezone.utc).isoformat()
                 command = build_command(config, invocation.case, invocation.model)
+                executed_command = ([str(config.time_executable), "-v", *command]
+                                    if config.measure_memory else command)
                 try:
                     result = ({"stdout": fixture.read_text(encoding="utf-8"), "stderr": "", "return_code": 0,
-                               "elapsed_seconds": 0.0, "timed_out": False} if smoke else execute(command, config.timeout_seconds))
+                               "elapsed_seconds": 0.0, "timed_out": False} if smoke else execute(executed_command, config.timeout_seconds))
                 except KeyboardInterrupt:
                     interrupted = True
                     raise
@@ -561,6 +629,11 @@ def run(config: BenchmarkConfig, project_root: Path, smoke: bool = False,
                           "repetition": invocation.repetition, "warmup": invocation.warmup,
                           "started_at": started_at, "completed_at": datetime.now(timezone.utc).isoformat(),
                           "status": status, "environment": metadata, "command": command,
+                          "executed_command": executed_command,
+                          "peak_rss_kib": parse_time_verbose(str(result["stderr"])) if config.measure_memory else None,
+                          "reported_kv_cache_bytes": parse_kv_cache_bytes(str(result["stdout"]) + "\n" + str(result["stderr"])),
+                          "memory_measurement_source": "GNU time -v" if config.measure_memory else None,
+                          "mmap_enabled": config.mmap,
                           "case": asdict(invocation.case), **result, "parsed_results": parsed}
                 if parse_error:
                     record["parse_error"] = parse_error

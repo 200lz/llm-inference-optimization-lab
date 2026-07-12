@@ -1,0 +1,20 @@
+executable: ../third_party/llama.cpp/build-release/bin/llama-bench
+model: ../models/qwen2.5-0.5b-instruct-q4_k_m.gguf
+threads: [4]
+prompt_tokens: [256]
+generated_tokens: [16]
+batch_sizes: [512]
+ubatch_sizes: [512]
+context_sizes: [512, 2048]
+kv_cache_variants:
+  - {key: f16, value: f16}
+  - {key: q8_0, value: q8_0}
+  - {key: q4_0, value: q4_0}
+repetitions: 1
+warmup_runs: 1
+timeout_seconds: 900
+output_directory: ../benchmarks/results/kv_cache_context_smoke
+mmap: true
+cpu_only: true
+measure_memory: true
+
