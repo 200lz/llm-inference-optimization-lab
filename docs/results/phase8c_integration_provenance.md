@@ -7,7 +7,7 @@
 - Source path: `third_party/llama.cpp/ggml/src/ggml-cpu/llamafile/sgemm.cpp`
 - Exported patch: `patches/phase8c-q8-rn2-scale-preparation.patch`
 - Patch SHA-256: `577832ba582818428dc34ca19e8e5a1cb56902a1411c9612c9fb834666df2a22`
-- Saved diff source: `/tmp/phase8c-audit/sgemm-preexisting.diff`
+- Saved diff source: temporary audit copy (`sgemm-preexisting.diff`)
 - Export verification: exported patch is byte-identical to the saved diff.
 
 ## Specialization guard
@@ -63,8 +63,8 @@ The declaration `__m256 dvec2[RN];` is visible in every instantiation, but it is
 
 Controlled assembly was generated from two temporary source snapshots with the same compiler and flags as the existing llama.cpp Release build command:
 
-- baseline source: `/tmp/phase8c-llama-baseline` at clean commit `e3546c7948e3af463d0b401e6421d5a4c2faf565`;
-- optimized source: `/tmp/phase8c-llama-optimized` at the same commit with only the exported patch applied;
+- baseline temporary source snapshot at clean commit `e3546c7948e3af463d0b401e6421d5a4c2faf565`;
+- optimized temporary source snapshot at the same commit with only the exported patch applied;
 - compiler: `/usr/bin/g++`;
 - flags include `-O3 -DNDEBUG -std=gnu++17 -fPIC -march=native -fopenmp`.
 
@@ -120,14 +120,14 @@ Configured but not built:
 
 Build source provenance:
 
-- baseline CMake source: `/tmp/phase8c-llama-baseline`
-- optimized CMake source: `/tmp/phase8c-llama-optimized`
+- baseline CMake source: temporary baseline snapshot
+- optimized CMake source: temporary optimized snapshot
 - both source trees are at commit `e3546c7948e3af463d0b401e6421d5a4c2faf565`;
 - optimized source has only `patches/phase8c-q8-rn2-scale-preparation.patch` applied;
 - both use `/usr/bin/gcc` and `/usr/bin/g++`;
 - both use Release build type and Ninja.
 
-The current dirty llama.cpp worktree is not used as the baseline. Controlled baseline/optimized builds can proceed safely from these configured directories. Binary checksums should be recorded after the actual builds are run.
+The then-dirty llama.cpp worktree was not used as the baseline. Controlled baseline/optimized builds could proceed safely from these configured directories; their later checksums are recorded in the [Phase 8D binary provenance report](phase8d_binary_provenance.md).
 
 ## Validation
 
@@ -147,4 +147,4 @@ Results:
 - CTest: 3/3 tests passed.
 - pytest: 94 passed, 3 existing plotting warnings.
 - `git diff --check`: passed for main repository and submodule diff.
-- Full end-to-end llama.cpp benchmark: not run.
+- Full end-to-end llama.cpp benchmark: not run during this intermediate phase; the later focused paired run is reported in [Phase 8D.1](phase8d_q8_end_to_end_ab.md).

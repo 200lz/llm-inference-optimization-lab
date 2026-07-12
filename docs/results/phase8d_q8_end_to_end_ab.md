@@ -8,8 +8,8 @@
 
 ## Provenance
 
-- **Verified conclusion:** Baseline `/tmp/phase8c-build-baseline/bin/llama-bench` retained SHA-256 `a6c9df640eccef76e6fcd1ba0c8fcf7be1b6cd04eb58a313614843a171021a9a`.
-- **Verified conclusion:** Optimized `/tmp/phase8c-build-optimized/bin/llama-bench` retained SHA-256 `382e58f3b9463e6d616abd7feae7f5055bd60ac8862d941fa65337f3c2faf900`.
+- **Verified conclusion:** The baseline `llama-bench` retained SHA-256 `a6c9df640eccef76e6fcd1ba0c8fcf7be1b6cd04eb58a313614843a171021a9a`.
+- **Verified conclusion:** The optimized `llama-bench` retained SHA-256 `382e58f3b9463e6d616abd7feae7f5055bd60ac8862d941fa65337f3c2faf900`.
 - **Verified conclusion:** Both sources remained at `e3546c7948e3af463d0b401e6421d5a4c2faf565`; baseline was clean and optimized differed only by the exported `sgemm.cpp` patch.
 - **Verified conclusion:** The patch SHA-256 remained `577832ba582818428dc34ca19e8e5a1cb56902a1411c9612c9fb834666df2a22`, and the optimized diff remained byte-identical to it.
 - **Verified conclusion:** Controlled CMake settings compared equal, both binaries passed `--help`, and both loaded the Q8_0 model under the selected affinity without rebuilding.
@@ -56,13 +56,7 @@
 - **Measured observation:** Generation first-half and second-half paired medians were -2.338% and -0.481%; duration values were +1.707% and +1.019%.
 - **Verified conclusion:** The predefined greater-than-1-percentage-point half-to-half prompt threshold marks temporal drift as material, even though the paired correlation alone is weak.
 
-![Paired prompt difference](../../benchmarks/results/phase8d1_q8_paired/paired_prompt_difference.png)
-
-![Paired generation difference](../../benchmarks/results/phase8d1_q8_paired/paired_generation_difference.png)
-
-![Paired duration difference](../../benchmarks/results/phase8d1_q8_paired/paired_duration_difference.png)
-
-![Prompt throughput by execution order](../../benchmarks/results/phase8d1_q8_paired/prompt_throughput_execution_order.png)
+The analyzer generates paired-difference and execution-order plots in the ignored local result directory. They are reproducible from the tracked analysis code and are not linked here because generated benchmark artifacts are intentionally untracked.
 
 ## Interpretation and decision
 
@@ -74,5 +68,5 @@
 
 ## Artifacts
 
-- **Verified conclusion:** The resumable raw records, manifest, environment snapshots, analysis JSON, and plots are under ignored path `benchmarks/results/phase8d1_q8_paired/`.
+- **Verified conclusion:** The resumable raw records, manifest, environment snapshots, analysis JSON, and plots were written under ignored path `benchmarks/results/phase8d1_q8_paired/`.
 - **Verified conclusion:** Reproducible runner and analysis logic are in `benchmarks/run_phase8_paired.py` and `benchmarks/analyze_phase8_optimization.py`, with focused tests in `tests/python/test_phase8_optimization.py`.

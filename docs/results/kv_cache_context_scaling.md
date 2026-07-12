@@ -100,21 +100,7 @@
 
 ## Plots
 
-- ![actual_growth_prompt_tokens_per_second.png](../../benchmarks/results/kv_cache_context_scaling/actual_growth_prompt_tokens_per_second.png)
-- ![actual_growth_generation_tokens_per_second.png](../../benchmarks/results/kv_cache_context_scaling/actual_growth_generation_tokens_per_second.png)
-- ![actual_growth_elapsed_seconds.png](../../benchmarks/results/kv_cache_context_scaling/actual_growth_elapsed_seconds.png)
-- ![actual_growth_peak_rss_kib.png](../../benchmarks/results/kv_cache_context_scaling/actual_growth_peak_rss_kib.png)
-- ![actual_growth_generation_cv_percent.png](../../benchmarks/results/kv_cache_context_scaling/actual_growth_generation_cv_percent.png)
-- ![allocated_context_prompt_tokens_per_second.png](../../benchmarks/results/kv_cache_context_scaling/allocated_context_prompt_tokens_per_second.png)
-- ![allocated_context_generation_tokens_per_second.png](../../benchmarks/results/kv_cache_context_scaling/allocated_context_generation_tokens_per_second.png)
-- ![allocated_context_elapsed_seconds.png](../../benchmarks/results/kv_cache_context_scaling/allocated_context_elapsed_seconds.png)
-- ![allocated_context_peak_rss_kib.png](../../benchmarks/results/kv_cache_context_scaling/allocated_context_peak_rss_kib.png)
-- ![allocated_context_generation_cv_percent.png](../../benchmarks/results/kv_cache_context_scaling/allocated_context_generation_cv_percent.png)
-- ![decode_length_prompt_tokens_per_second.png](../../benchmarks/results/kv_cache_context_scaling/decode_length_prompt_tokens_per_second.png)
-- ![decode_length_generation_tokens_per_second.png](../../benchmarks/results/kv_cache_context_scaling/decode_length_generation_tokens_per_second.png)
-- ![decode_length_elapsed_seconds.png](../../benchmarks/results/kv_cache_context_scaling/decode_length_elapsed_seconds.png)
-- ![decode_length_peak_rss_kib.png](../../benchmarks/results/kv_cache_context_scaling/decode_length_peak_rss_kib.png)
-- ![decode_length_generation_cv_percent.png](../../benchmarks/results/kv_cache_context_scaling/decode_length_generation_cv_percent.png)
+The analyzer generates throughput, duration, peak-RSS, and CV plots for all three sweeps in the ignored local result directory. They are reproducible from the tracked configuration and are not linked here because generated benchmark artifacts are intentionally untracked.
 
 ## Limitations
 

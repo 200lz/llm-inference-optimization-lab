@@ -58,17 +58,7 @@
 
 ## Plots
 
-![Prompt length versus prompt processing](prompt_length_prompt_processing.png)
-
-![Prompt length versus generation](prompt_length_generation.png)
-
-![Threads versus prompt processing](threads_prompt_processing.png)
-
-![Threads versus generation](threads_generation.png)
-
-![Generation length versus generation](generation_length_generation.png)
-
-![Coefficient of variation](coefficient_of_variation.png)
+The analyzer generates prompt-length, generation-length, thread-scaling, and CV plots in the ignored local result directory. They are reproducible from the tracked configuration and are not linked here because generated benchmark artifacts are intentionally untracked.
 
 ## Limitations
 

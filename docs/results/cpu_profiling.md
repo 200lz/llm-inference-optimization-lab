@@ -9,7 +9,7 @@
 
 ## Environment
 
-The host is an AMD Ryzen 7 5800H (8 physical cores, 16 logical CPUs), 7.5 GiB RAM, running WSL2 kernel `6.18.33.2-microsoft-standard-WSL2`. `perf_event_paranoid=2`, `kptr_restrict=1`, user `chen1`, and affinity CPUs 0-15 were unchanged. CPU governor files were not exposed. Full flags and commands are in [profiling_environment.md](../profiling_environment.md).
+The host is an AMD Ryzen 7 5800H (8 physical cores, 16 logical CPUs), 7.5 GiB RAM, running WSL2 kernel `6.18.33.2-microsoft-standard-WSL2`. `perf_event_paranoid=2`, `kptr_restrict=1`, and affinity CPUs 0-15 were unchanged. CPU governor files were not exposed. Full flags and commands are in [profiling_environment.md](../profiling_environment.md).
 
 The verified CPU Release build is pinned at `e3546c7948e3af463d0b401e6421d5a4c2faf565`: `Release`, `-O3 -DNDEBUG`, `GGML_CPU=ON`, `GGML_NATIVE=ON`, and `GGML_CPU_REPACK=ON`. The ELF is unstripped and has `.symtab`, but no DWARF debug sections; frame pointers were not explicitly enabled. DWARF call graphs at 99 Hz nevertheless resolved GGML shared-library functions, so no separate profiling build was created or substituted. Model source revision is `9217f5db79a29953eb74d5343926648285ec7e67` for all three artifacts.
 

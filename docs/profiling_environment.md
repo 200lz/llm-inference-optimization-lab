@@ -13,7 +13,7 @@ Captured on 2026-07-12 before Phase 7 profiling. The machine-readable event prob
 | perf | 7.0.6 (`/usr/bin/perf`) |
 | `perf_event_paranoid` | 2 |
 | `kptr_restrict` | 1 |
-| User | `chen1` |
+| User | unprivileged local user |
 | Affinity | CPUs 0-15 |
 | Memory | 7.5 GiB total, 6.7 GiB available; 2.0 GiB swap |
 | Governor | unavailable: WSL2 exposed no `cpu0/cpufreq` files |

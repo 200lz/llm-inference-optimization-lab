@@ -78,14 +78,7 @@
 
 ## Plots
 
-![File size](file_size.png)
-![Short prompt processing](p128_prompt_processing.png)
-![Short generation](p128_generation.png)
-![Long prompt processing](p1024_prompt_processing.png)
-![Long generation](p1024_generation.png)
-![Thread prompt processing](threads_prompt_processing.png)
-![Thread generation](threads_generation.png)
-![Variability](coefficient_of_variation.png)
+The analyzer generates file-size, phase-throughput, thread-scaling, and variability plots in the ignored local result directory. They are reproducible from the tracked configuration and are not linked here because generated benchmark artifacts are intentionally untracked.
 
 ## Deterministic output comparison
 

@@ -130,11 +130,10 @@ The submodule commit matches `docs/dependencies.md`:
 e3546c7948e3af463d0b401e6421d5a4c2faf565 third_party/llama.cpp
 ```
 
-However, the submodule worktree is not clean:
+At the time of this intermediate experiment, the submodule worktree contained the local integration edit:
 
 ```text
  M ggml/src/ggml-cpu/llamafile/sgemm.cpp
 ```
 
-This local submodule edit was present before this Phase 8C continuation. No
-additional Phase 8C edits were made inside `third_party/llama.cpp`.
+That edit was later exported to the tracked patch and removed from the submodule. The final portfolio state is clean at the pinned commit; see the [binary provenance report](phase8d_binary_provenance.md).

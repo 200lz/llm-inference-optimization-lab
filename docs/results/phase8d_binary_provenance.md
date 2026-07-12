@@ -2,12 +2,7 @@
 
 ## Recovery audit
 
-The Linux/WSL restart removed all four controlled `/tmp` directories:
-
-- `/tmp/phase8c-llama-baseline`
-- `/tmp/phase8c-llama-optimized`
-- `/tmp/phase8c-build-baseline`
-- `/tmp/phase8c-build-optimized`
+The Linux/WSL restart removed all four controlled temporary source and build directories (baseline and optimized variants).
 
 They were recreated on 2026-07-12. The persistent integration patch was present
 at `patches/phase8c-q8-rn2-scale-preparation.patch` and had the required
@@ -28,8 +23,8 @@ Both controlled sources are detached at:
 e3546c7948e3af463d0b401e6421d5a4c2faf565
 ```
 
-The baseline at `/tmp/phase8c-llama-baseline` is clean and has no Phase 8
-patch. The optimized source at `/tmp/phase8c-llama-optimized` has exactly one
+The baseline temporary source snapshot is clean and has no Phase 8
+patch. The optimized temporary source snapshot has exactly one
 modified file:
 
 ```text
@@ -49,17 +44,17 @@ apart from their required source/build paths.
 Configure command, with the corresponding source and build variant substituted:
 
 ```console
-cmake -S /tmp/phase8c-llama-<variant> -B /tmp/phase8c-build-<variant> -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=/usr/bin/gcc -DCMAKE_CXX_COMPILER=/usr/bin/g++ -DGGML_NATIVE=ON -DGGML_CUDA=OFF -DGGML_HIP=OFF -DGGML_METAL=OFF -DGGML_OPENCL=OFF -DGGML_SYCL=OFF -DGGML_VULKAN=OFF -DGGML_BLAS=OFF -DGGML_RPC=OFF -DLLAMA_CURL=OFF
+cmake -S <temporary-source-variant> -B <temporary-build-variant> -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=/usr/bin/gcc -DCMAKE_CXX_COMPILER=/usr/bin/g++ -DGGML_NATIVE=ON -DGGML_CUDA=OFF -DGGML_HIP=OFF -DGGML_METAL=OFF -DGGML_OPENCL=OFF -DGGML_SYCL=OFF -DGGML_VULKAN=OFF -DGGML_BLAS=OFF -DGGML_RPC=OFF -DLLAMA_CURL=OFF
 ```
 
 Build command:
 
 ```console
-cmake --build /tmp/phase8c-build-<variant> --target llama-bench llama-cli
+cmake --build <temporary-build-variant> --target llama-bench llama-cli
 ```
 
 The baseline was configured and built before the optimized variant. Complete
-logs and command/exit-code sidecars are under `/tmp/phase8c-logs/`. Configure
+logs and command/exit-code sidecars were stored in a temporary log directory. Configure
 and build exit codes were `0` for both variants. Each tree contains 281 object
 files and a `.ninja_log`. The disconnected UI asset step warned and used its
 supported no-embedded-UI fallback; it did not fail either build.
@@ -68,12 +63,12 @@ supported no-embedded-UI fallback; it did not fail either build.
 
 | Variant | Binary | Size (bytes) | SHA-256 | Build timestamp (JST) |
 | --- | --- | ---: | --- | --- |
-| Baseline | `/tmp/phase8c-build-baseline/bin/llama-bench` | 17,904 | `a6c9df640eccef76e6fcd1ba0c8fcf7be1b6cd04eb58a313614843a171021a9a` | 2026-07-12 21:59:34.519810449 +0900 |
-| Baseline | `/tmp/phase8c-build-baseline/bin/llama-cli` | 1,434,720 | `1e872086193818259086464cb1ee1c470469d1f1679b460628318543120ae15a` | 2026-07-12 22:00:42.293030468 +0900 |
-| Baseline | `/tmp/phase8c-build-baseline/bin/libggml-cpu.so.0.16.0` | 1,156,160 | `dcfdd19c2c1f8e4777f0a0e83c241eeab7414ed4210c4a5fcba20d1cfd1f1eb9` | 2026-07-12 21:58:12.135162193 +0900 |
-| Optimized | `/tmp/phase8c-build-optimized/bin/llama-bench` | 17,904 | `382e58f3b9463e6d616abd7feae7f5055bd60ac8862d941fa65337f3c2faf900` | 2026-07-12 22:02:48.522714678 +0900 |
-| Optimized | `/tmp/phase8c-build-optimized/bin/llama-cli` | 1,434,720 | `e888c15051a6410a933d15e3f42045ac4b5ad5e4ab335f0a7f7ce41d8e9cf3b6` | 2026-07-12 22:03:58.731804271 +0900 |
-| Optimized | `/tmp/phase8c-build-optimized/bin/libggml-cpu.so.0.16.0` | 1,156,160 | `8a3b97c45f33d92790de3d1a7e34bb3e175d78df37f34f9820e686aab6d1b933` | 2026-07-12 22:01:30.686122688 +0900 |
+| Baseline | `llama-bench` | 17,904 | `a6c9df640eccef76e6fcd1ba0c8fcf7be1b6cd04eb58a313614843a171021a9a` | 2026-07-12 21:59:34.519810449 +0900 |
+| Baseline | `llama-cli` | 1,434,720 | `1e872086193818259086464cb1ee1c470469d1f1679b460628318543120ae15a` | 2026-07-12 22:00:42.293030468 +0900 |
+| Baseline | `libggml-cpu.so.0.16.0` | 1,156,160 | `dcfdd19c2c1f8e4777f0a0e83c241eeab7414ed4210c4a5fcba20d1cfd1f1eb9` | 2026-07-12 21:58:12.135162193 +0900 |
+| Optimized | `llama-bench` | 17,904 | `382e58f3b9463e6d616abd7feae7f5055bd60ac8862d941fa65337f3c2faf900` | 2026-07-12 22:02:48.522714678 +0900 |
+| Optimized | `llama-cli` | 1,434,720 | `e888c15051a6410a933d15e3f42045ac4b5ad5e4ab335f0a7f7ce41d8e9cf3b6` | 2026-07-12 22:03:58.731804271 +0900 |
+| Optimized | `libggml-cpu.so.0.16.0` | 1,156,160 | `8a3b97c45f33d92790de3d1a7e34bb3e175d78df37f34f9820e686aab6d1b933` | 2026-07-12 22:01:30.686122688 +0900 |
 
 All corresponding baseline and optimized checksums differ. Both `llama-bench`
 and `llama-cli` variants returned exit code 0 for `--help`. Dynamic linkage
@@ -118,7 +113,7 @@ The smoke used Q8_0, prompt 1024, generation 64, four threads, batch/ubatch
 512, CPU only, mmap enabled, one warm-up per variant, and three measured
 repetitions per variant. Runs were sequential in measured order
 `baseline, optimized, optimized, baseline, baseline, optimized`. Raw JSON,
-stderr, commands, and exit-code files are under `/tmp/phase8c-smoke/`.
+stderr, commands, and exit-code files were stored in a temporary smoke directory.
 
 | Metric | Baseline samples (tok/s) | Optimized samples (tok/s) | Baseline median / CV | Optimized median / CV | Median ratio |
 | --- | --- | --- | --- | --- | --- |
@@ -128,13 +123,12 @@ stderr, commands, and exit-code files are under `/tmp/phase8c-smoke/`.
 Neither median regressed by more than 1%. However, indexed optimized/baseline
 deltas ranged from -0.53% to +4.52% for prompt processing and from -0.87% to
 +3.77% for generation. With only three samples, the smoke is inconclusive.
-Per the Phase 8D stop condition, the full A/B matrix was not run and is not yet
-ready for execution without reviewing this variability.
+Per the Phase 8D stop condition, the full matrix was not run from this smoke.
+A later focused 20-pair confirmation is documented in [Phase 8D.1](phase8d_q8_end_to_end_ab.md).
 
 ## Repository state
 
-The main worktree retains pre-existing Phase 8 changes and has no whitespace
-errors under `git diff --check`. The original submodule remains at the pinned
-commit and dirty only at
-`ggml/src/ggml-cpu/llamafile/sgemm.cpp`, with the expected 18 insertions and
-3 deletions. No commit was created.
+At this historical checkpoint, the main worktree retained Phase 8 changes and
+had no whitespace errors under `git diff --check`; the submodule contained only
+the expected integration edit. That edit was subsequently exported and removed.
+The final portfolio state keeps the submodule clean at the pinned commit.
