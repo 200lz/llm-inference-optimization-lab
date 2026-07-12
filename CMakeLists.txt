@@ -34,8 +34,25 @@ add_executable(kernel_q4_hotpath_bench kernels/q4_hotpath/benchmark/bench_q6_q8.
 target_link_libraries(kernel_q4_hotpath_bench PRIVATE q4_hotpath_kernels)
 target_compile_options(kernel_q4_hotpath_bench PRIVATE $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic>)
 
+add_library(q8_rn2_scale_kernels
+  kernels/q8_rn2_scale/q8_rn2_scale.cpp
+)
+target_include_directories(q8_rn2_scale_kernels PUBLIC kernels/q8_rn2_scale)
+target_compile_options(q8_rn2_scale_kernels PRIVATE
+  $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-mavx2;-mfma;-mf16c>
+)
+
+add_executable(q8_rn2_scale_test kernels/q8_rn2_scale/tests/test_q8_rn2_scale.cpp)
+target_link_libraries(q8_rn2_scale_test PRIVATE q8_rn2_scale_kernels)
+target_compile_options(q8_rn2_scale_test PRIVATE $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-mavx2;-mfma;-mf16c>)
+
+add_executable(q8_rn2_scale_bench kernels/q8_rn2_scale/benchmark/bench_q8_rn2_scale.cpp)
+target_link_libraries(q8_rn2_scale_bench PRIVATE q8_rn2_scale_kernels)
+target_compile_options(q8_rn2_scale_bench PRIVATE $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic;-mavx2;-mfma;-mf16c>)
+
 include(CTest)
 if(BUILD_TESTING)
   add_test(NAME native_smoke COMMAND native_smoke)
   add_test(NAME kernel_q4_hotpath_correctness COMMAND kernel_q4_hotpath_test)
+  add_test(NAME q8_rn2_scale_correctness COMMAND q8_rn2_scale_test)
 endif()
