@@ -1,0 +1,14 @@
+executable: ../tests/fixtures/fake_llama_bench.py
+model: ../tests/fixtures/fake-model.gguf
+threads: [1]
+prompt_tokens: [128]
+generated_tokens: [32]
+batch_sizes: [64]
+ubatch_sizes: [64]
+context_sizes: [512]
+repetitions: 3
+warmup_runs: 0
+timeout_seconds: 5
+output_directory: ../benchmarks/results/fake_integration_smoke_sigint
+mmap: true
+cpu_only: true

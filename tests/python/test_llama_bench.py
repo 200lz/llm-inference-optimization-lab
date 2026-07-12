@@ -52,7 +52,7 @@ def test_command_construction_is_an_argv_list(tmp_path: Path) -> None:
     command = harness.build_command(config, harness.Case(4, 128, 32, 64, 512))
     assert command == [
         "/path with spaces/llama-bench", "-m", "/model with spaces.gguf", "-t", "4",
-        "-p", "128", "-n", "32", "-b", "64", "-d", "352", "-r", "1",
+        "-p", "128", "-n", "32", "-b", "64", "-ub", "512", "-d", "352", "-r", "1",
         "-o", "md", "-mmp", "1", "-ngl", "0", "-dev", "none",
     ]
 
@@ -119,3 +119,11 @@ def test_jsonl_and_csv_output(tmp_path: Path) -> None:
         rows = list(csv.DictReader(stream))
     assert len(rows) == 1
     assert rows[0]["model_name"] == "value-model_name"
+
+
+def test_explicit_experiment_matrix_is_deduplicated() -> None:
+    config = harness.load_config(Path("configs/prefill_decode_scaling.yaml"))
+    unique = list(harness.cases(config))
+    assert len(unique) == 13
+    assert len(set(unique)) == 13
+    assert sum(case.threads == 4 and case.prompt_tokens == 512 and case.generated_tokens == 64 for case in unique) == 1

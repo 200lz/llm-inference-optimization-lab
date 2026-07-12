@@ -19,11 +19,45 @@ For each parameter combination, configured warm-up invocations run before measur
 
 Repeated measurements are separate process invocations and separate CSV rows. Keep them separate when inspecting variance; report an aggregation and dispersion measure only alongside the repetition count and full methodology.
 
-## Failures and result formats
+## Progress, durability, and result formats
 
-Every invocation produces a JSONL record, including warm-ups, nonzero exits, timeouts, launch failures, and parser failures. Records contain stdout, stderr, return code, elapsed time, exact command, parameter case, and shared environment metadata. A timeout or launch failure has a null return code. Parser errors are annotated rather than discarded.
+Before every invocation, the harness prints and flushes its position in the plan, stable case ID, phase and repetition, workload, thread count, subprocess timeout, and whole-run elapsed time. After the child exits, it immediately prints the return code, duration, parse status, available pp/tg throughput, and cumulative success/failure counts. The configured subprocess timeout is separate from `--max-total-seconds`; when the latter is omitted, the whole matrix is explicitly unlimited.
+
+Every completed invocation is appended immediately to `run.jsonl`, including warm-ups, nonzero exits, timeouts, launch failures, and parser failures. Each append is one complete JSON object plus a newline, followed by `flush()` and, by default, `fsync()`. `--no-fsync` is available for short disposable runs, but should not be used for long benchmarks. Records include stable run, case, and invocation IDs; phase and repetition; UTC start/completion timestamps; stdout, stderr, return code, elapsed time, exact command, parameter case, status, parsed values, and shared environment metadata.
+
+`run-summary.json` is replaced atomically after each completed invocation. It records planned/completed/successful/failed/timed-out counts, the last completed case, elapsed time, the configuration fingerprint, and `running`, `interrupted`, `failed`, or `completed` status.
 
 The JSONL file is the raw audit trail. The CSV is a convenience view containing only successfully executed, successfully parsed, non-warm-up measurements. Retain the JSONL whenever sharing CSV results.
+
+## Resume and retry workflow
+
+Start a new run normally. The output directory must not already contain `run.jsonl` or `run-summary.json`, which prevents accidental overwrite:
+
+```console
+.venv/bin/python benchmarks/run_llama_bench.py configs/prefill_decode_scaling.yaml
+```
+
+After interruption, use the same configuration and output directory:
+
+```console
+.venv/bin/python benchmarks/run_llama_bench.py configs/prefill_decode_scaling.yaml --resume
+```
+
+Resume validates every JSONL line and the stored configuration fingerprint. It rejects malformed/truncated JSONL and incompatible configurations. It skips invocation IDs already recorded, including failures. `--force-resume` bypasses only the fingerprint check and should be used with care.
+
+To retry failed, timed-out, or parse-error invocations while continuing to skip successes:
+
+```console
+.venv/bin/python benchmarks/run_llama_bench.py configs/prefill_decode_scaling.yaml --resume --retry-failures
+```
+
+Retries append a new audit record with the same invocation ID; the latest record determines summary and CSV state. A successful invocation is never rerun by `--retry-failures`.
+
+## Interruption and partial-result semantics
+
+On SIGINT, the harness terminates the active child (escalating to kill after five seconds), preserves every previously fsynced JSONL record, marks the summary `interrupted`, does not create a normal CSV, and exits with status 130. The in-flight invocation has not completed and is intentionally absent, so resume reruns it.
+
+Normalized CSV is generated automatically only after all required measured invocation IDs have records. `--write-csv` or `--allow-partial-analysis` explicitly permits an incomplete CSV; it begins with `# incomplete: true`. Partial CSV is diagnostic and must not be presented as a completed experiment. Raw JSONL and the summary remain authoritative.
 
 ## Build type
 
