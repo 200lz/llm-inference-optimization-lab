@@ -1,0 +1,27 @@
+schema_version: 1
+executable: ../third_party/llama.cpp/build-release/bin/llama-bench
+perf_executable: /usr/bin/perf
+models:
+  - {id: qwen2.5-0.5b-instruct-f16, path: ../models/qwen2.5-0.5b-instruct-fp16.gguf, quantization: F16}
+  - {id: qwen2.5-0.5b-instruct-q8_0, path: ../models/qwen2.5-0.5b-instruct-q8_0.gguf, quantization: Q8_0}
+  - {id: qwen2.5-0.5b-instruct-q4_k_m, path: ../models/qwen2.5-0.5b-instruct-q4_k_m.gguf, quantization: Q4_K_M}
+workloads:
+  - {id: primary-p1024-n64-t4, prompt_tokens: 1024, generated_tokens: 64, threads: 4}
+  - {id: short-p128-n64-t4, prompt_tokens: 128, generated_tokens: 64, threads: 4}
+  - {id: long-p2048-n64-t4, prompt_tokens: 2048, generated_tokens: 64, threads: 4}
+  - {id: checkpoint-p1024-n64-t1, prompt_tokens: 1024, generated_tokens: 64, threads: 1}
+  - {id: checkpoint-p1024-n64-t8, prompt_tokens: 1024, generated_tokens: 64, threads: 8}
+batch: 512
+ubatch: 512
+context_size: 4096
+mmap: true
+cpu_only_flags: [-ngl, "0", -dev, none]
+warmup_count: 1
+stat_profile_count: 3
+record_profile_count: 1
+record_workloads: [primary-p1024-n64-t4]
+timeout_seconds: 900
+perf_events: [task-clock, cpu-clock, cycles, instructions, branches, branch-misses, cache-references, cache-misses, context-switches, cpu-migrations, page-faults, minor-faults, major-faults, stalled-cycles-frontend, stalled-cycles-backend, L1-dcache-loads, L1-dcache-load-misses, LLC-loads, LLC-load-misses]
+output_directory: ../profiles
+# The runner computes and records the canonical SHA-256 configuration fingerprint.
+configuration_fingerprint: auto

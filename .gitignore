@@ -36,6 +36,9 @@ results/*
 *.benchmark.csv
 benchmark-results/
 
+# Generated profiler artifacts and machine-specific logs
+profiles/
+
 # llama.cpp build and generated outputs
 third_party/llama.cpp/build/
 third_party/llama.cpp/build-*/
