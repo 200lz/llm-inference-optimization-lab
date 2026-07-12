@@ -45,6 +45,16 @@ class BenchmarkConfig:
     cpu_only: bool = True
     smoke_fixture: Path | None = None
     explicit_cases: tuple[Case, ...] | None = None
+    models: tuple[ModelSpec, ...] = ()
+
+
+@dataclass(frozen=True)
+class ModelSpec:
+    logical_id: str
+    path: Path
+    quantization: str
+    sha256: str | None = None
+    byte_size: int | None = None
 
 
 @dataclass(frozen=True)
@@ -58,10 +68,11 @@ class Case:
 
 
 CSV_FIELDS = (
-    "timestamp_utc", "model_name", "model_size", "backend", "thread_count",
+    "timestamp_utc", "model_logical_id", "model_filename", "quantization",
+    "model_sha256", "model_file_size", "invocation_id", "model_name", "model_size", "backend", "thread_count",
     "prompt_tokens", "generated_tokens", "prompt_tokens_per_second",
     "generation_tokens_per_second", "test_identifier", "batch_size",
-    "context_size", "repetition", "elapsed_seconds",
+    "ubatch_size", "context_size", "repetition", "elapsed_seconds",
 )
 
 
@@ -85,6 +96,7 @@ class Invocation:
     invocation_id: str
     warmup: bool
     repetition: int
+    model: ModelSpec
 
 
 def _positive_list(data: Mapping[str, Any], key: str) -> tuple[int, ...]:
@@ -103,17 +115,19 @@ def load_config(path: Path) -> BenchmarkConfig:
     if not isinstance(raw, dict):
         raise ConfigError("configuration root must be a mapping")
     required = {
-        "executable", "model", "threads", "prompt_tokens", "generated_tokens",
+        "executable", "threads", "prompt_tokens", "generated_tokens",
         "batch_sizes", "context_sizes", "repetitions", "warmup_runs",
         "timeout_seconds", "output_directory",
     }
-    optional = {"smoke_fixture", "mmap", "cpu_only", "explicit_cases", "ubatch_sizes"}
+    optional = {"model", "models", "smoke_fixture", "mmap", "cpu_only", "explicit_cases", "ubatch_sizes"}
     missing = sorted(required - raw.keys())
     unknown = sorted(raw.keys() - required - optional)
     if missing:
         raise ConfigError(f"missing required keys: {', '.join(missing)}")
     if unknown:
         raise ConfigError(f"unknown keys: {', '.join(unknown)}")
+    if ("model" in raw) == ("models" in raw):
+        raise ConfigError("configuration must contain exactly one of model or models")
 
     def path_value(key: str) -> Path:
         value = raw[key]
@@ -150,8 +164,37 @@ def load_config(path: Path) -> BenchmarkConfig:
                 raise ConfigError(f"explicit_cases[{index}] values must be positive integers")
             built.append(Case(**entry))
         explicit = tuple(built)
+    model_specs: tuple[ModelSpec, ...]
+    if "models" in raw:
+        entries = raw["models"]
+        if not isinstance(entries, list) or not entries:
+            raise ConfigError("models must be a non-empty list")
+        built_models, ids = [], set()
+        allowed_model = {"id", "path", "quantization", "sha256", "byte_size"}
+        for index, entry in enumerate(entries):
+            if not isinstance(entry, dict) or not {"id", "path", "quantization"} <= set(entry) or set(entry) - allowed_model:
+                raise ConfigError(f"models[{index}] requires id, path, and quantization")
+            if any(not isinstance(entry[k], str) or not entry[k].strip() for k in ("id", "path", "quantization")):
+                raise ConfigError(f"models[{index}] string fields must be non-empty")
+            if entry["id"] in ids:
+                raise ConfigError(f"duplicate model ID: {entry['id']}")
+            ids.add(entry["id"])
+            sha = entry.get("sha256")
+            if sha is not None and (not isinstance(sha, str) or not re.fullmatch(r"[0-9a-fA-F]{64}", sha)):
+                raise ConfigError(f"models[{index}].sha256 must be 64 hexadecimal characters")
+            size = entry.get("byte_size")
+            if size is not None and (type(size) is not int or size <= 0):
+                raise ConfigError(f"models[{index}].byte_size must be a positive integer")
+            candidate = Path(entry["path"]).expanduser()
+            candidate = candidate if candidate.is_absolute() else (path.parent / candidate).resolve()
+            built_models.append(ModelSpec(entry["id"], candidate, entry["quantization"].upper(), sha.lower() if sha else None, size))
+        model_specs = tuple(built_models)
+        legacy_model = model_specs[0].path
+    else:
+        legacy_model = path_value("model")
+        model_specs = (ModelSpec(legacy_model.stem, legacy_model, "UNKNOWN"),)
     return BenchmarkConfig(
-        executable=path_value("executable"), model=path_value("model"),
+        executable=path_value("executable"), model=legacy_model,
         threads=_positive_list(raw, "threads"),
         prompt_tokens=_positive_list(raw, "prompt_tokens"),
         generated_tokens=_positive_list(raw, "generated_tokens"),
@@ -163,6 +206,7 @@ def load_config(path: Path) -> BenchmarkConfig:
         mmap=raw.get("mmap", True), cpu_only=raw.get("cpu_only", True),
         smoke_fixture=((path.parent / smoke).resolve() if smoke and not Path(smoke).is_absolute() else Path(smoke) if smoke else None),
         explicit_cases=explicit,
+        models=model_specs,
     )
 
 
@@ -182,11 +226,11 @@ def cases(config: BenchmarkConfig) -> Iterable[Case]:
     return iter(result)
 
 
-def build_command(config: BenchmarkConfig, case: Case) -> list[str]:
+def build_command(config: BenchmarkConfig, case: Case, model: ModelSpec | None = None) -> list[str]:
     """Construct an argv list; no value is interpreted by a shell."""
     depth = case.context_size - case.prompt_tokens - case.generated_tokens
     command = [
-        str(config.executable), "-m", str(config.model), "-t", str(case.threads),
+        str(config.executable), "-m", str((model or _models(config)[0]).path), "-t", str(case.threads),
         "-p", str(case.prompt_tokens), "-n", str(case.generated_tokens),
         "-b", str(case.batch_size), "-ub", str(case.ubatch_size), "-d", str(depth), "-r", "1",
         "-o", "md", "-mmp", "1" if config.mmap else "0",
@@ -325,21 +369,42 @@ def case_id(case: Case) -> str:
     return f"p{case.prompt_tokens}-n{case.generated_tokens}-t{case.threads}-b{case.batch_size}-ub{case.ubatch_size}-c{case.context_size}"
 
 
+def _models(config: BenchmarkConfig) -> tuple[ModelSpec, ...]:
+    return config.models or (ModelSpec(config.model.stem, config.model, "UNKNOWN"),)
+
+
+def verify_models(config: BenchmarkConfig) -> None:
+    for model in _models(config):
+        if model.sha256 is None and model.byte_size is None:
+            continue
+        if not model.path.is_file():
+            raise ConfigError(f"model file does not exist: {model.path}")
+        if model.byte_size is not None and model.path.stat().st_size != model.byte_size:
+            raise ConfigError(f"model file size mismatch: {model.logical_id}")
+        if model.sha256 is not None:
+            digest = hashlib.sha256()
+            with model.path.open("rb") as stream:
+                while chunk := stream.read(1024 * 1024): digest.update(chunk)
+            if digest.hexdigest() != model.sha256:
+                raise ConfigError(f"model checksum mismatch: {model.logical_id}")
+
+
 def invocations(config: BenchmarkConfig) -> list[Invocation]:
-    specs: list[tuple[Case, bool, int]] = []
-    for case in cases(config):
-        specs.extend((case, True, index) for index in range(1, config.warmup_runs + 1))
-        specs.extend((case, False, index) for index in range(1, config.repetitions + 1))
+    specs: list[tuple[ModelSpec, Case, bool, int]] = []
+    for model in _models(config):
+        for case in cases(config):
+            specs.extend((model, case, True, index) for index in range(1, config.warmup_runs + 1))
+            specs.extend((model, case, False, index) for index in range(1, config.repetitions + 1))
     total = len(specs)
     return [Invocation(number, total, case, case_id(case),
-                       f"{case_id(case)}:{'warmup' if warmup else 'measured'}:{repetition}",
-                       warmup, repetition)
-            for number, (case, warmup, repetition) in enumerate(specs, 1)]
+                       f"{model.logical_id}:{case_id(case)}:{'warmup' if warmup else 'measured'}:{repetition}",
+                       warmup, repetition, model)
+            for number, (model, case, warmup, repetition) in enumerate(specs, 1)]
 
 
 def config_fingerprint(config: BenchmarkConfig) -> str:
     payload = {
-        "executable": str(config.executable), "model": str(config.model),
+        "executable": str(config.executable), "models": [asdict(model) | {"path": str(model.path)} for model in _models(config)],
         "cases": [asdict(case) for case in cases(config)], "repetitions": config.repetitions,
         "warmup_runs": config.warmup_runs, "timeout_seconds": config.timeout_seconds,
         "mmap": config.mmap, "cpu_only": config.cpu_only,
@@ -393,7 +458,14 @@ def normalized_records(records: Sequence[Mapping[str, Any]]) -> list[dict[str, A
         case = record["case"]
         for row in record.get("parsed_results", []):
             normalized.append({**row, "timestamp_utc": record["started_at"],
-                               "batch_size": case["batch_size"], "context_size": case["context_size"],
+                               "model_logical_id": record.get("model_logical_id"),
+                               "model_filename": record.get("model_filename"),
+                               "quantization": record.get("quantization"),
+                               "model_sha256": record.get("model_sha256"),
+                               "model_file_size": record.get("model_file_size"),
+                               "invocation_id": record.get("invocation_id"),
+                               "batch_size": case["batch_size"], "ubatch_size": case["ubatch_size"],
+                               "context_size": case["context_size"],
                                "repetition": record["repetition"], "elapsed_seconds": record["elapsed_seconds"]})
     return normalized
 
@@ -410,6 +482,7 @@ def _write_csv(path: Path, rows: Sequence[Mapping[str, Any]], incomplete: bool) 
 def run(config: BenchmarkConfig, project_root: Path, smoke: bool = False,
         options: RunOptions | None = None) -> tuple[Path, Path, int]:
     options = options or RunOptions()
+    verify_models(config)
     fixture = config.smoke_fixture
     if smoke and (fixture is None or not fixture.is_file()):
         raise ConfigError("smoke mode requires an existing smoke_fixture")
@@ -458,12 +531,12 @@ def run(config: BenchmarkConfig, project_root: Path, smoke: bool = False,
                     break
                 phase = "warmup" if invocation.warmup else "measured"
                 repetition_text = f"{invocation.repetition}/{config.warmup_runs if invocation.warmup else config.repetitions}"
-                print(f"[{invocation.number}/{invocation.total}] case={invocation.case_id} {phase}={repetition_text}", flush=True)
+                print(f"[{invocation.number}/{invocation.total}] case={invocation.case_id} model={invocation.model.logical_id} {phase}={repetition_text}", flush=True)
                 print(f"prompt={invocation.case.prompt_tokens} gen={invocation.case.generated_tokens} "
                       f"threads={invocation.case.threads} timeout={config.timeout_seconds:g}s "
                       f"elapsed={elapsed:.1f}s", flush=True)
                 started_at = datetime.now(timezone.utc).isoformat()
-                command = build_command(config, invocation.case)
+                command = build_command(config, invocation.case, invocation.model)
                 try:
                     result = ({"stdout": fixture.read_text(encoding="utf-8"), "stderr": "", "return_code": 0,
                                "elapsed_seconds": 0.0, "timed_out": False} if smoke else execute(command, config.timeout_seconds))
@@ -480,6 +553,11 @@ def run(config: BenchmarkConfig, project_root: Path, smoke: bool = False,
                         parse_error, status = str(exc), "parse_error"
                 record = {"run_id": run_id, "case_id": invocation.case_id,
                           "invocation_id": invocation.invocation_id, "phase": phase,
+                          "model_logical_id": invocation.model.logical_id,
+                          "model_filename": invocation.model.path.name,
+                          "quantization": invocation.model.quantization,
+                          "model_sha256": invocation.model.sha256,
+                          "model_file_size": invocation.model.byte_size,
                           "repetition": invocation.repetition, "warmup": invocation.warmup,
                           "started_at": started_at, "completed_at": datetime.now(timezone.utc).isoformat(),
                           "status": status, "environment": metadata, "command": command,

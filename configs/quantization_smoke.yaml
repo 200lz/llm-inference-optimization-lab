@@ -1,0 +1,17 @@
+executable: ../third_party/llama.cpp/build-release/bin/llama-bench
+models:
+  - {id: qwen2.5-0.5b-instruct-f16, path: ../models/qwen2.5-0.5b-instruct-fp16.gguf, quantization: F16, sha256: 8e0ae26000627ed62de0e78e41860af70094558b9d2913385c842a6aa06cf3fc, byte_size: 1266425696}
+  - {id: qwen2.5-0.5b-instruct-q8_0, path: ../models/qwen2.5-0.5b-instruct-q8_0.gguf, quantization: Q8_0, sha256: ca59ca7f13d0e15a8cfa77bd17e65d24f6844b554a7b6c12e07a5f89ff76844e, byte_size: 675710816}
+  - {id: qwen2.5-0.5b-instruct-q4_k_m, path: ../models/qwen2.5-0.5b-instruct-q4_k_m.gguf, quantization: Q4_K_M, sha256: 74a4da8c9fdbcd15bd1f6d01d621410d31c6fc00986f5eb687824e7b93d7a9db, byte_size: 491400032}
+threads: [4]
+prompt_tokens: [128]
+generated_tokens: [16]
+batch_sizes: [512]
+ubatch_sizes: [512]
+context_sizes: [512]
+repetitions: 1
+warmup_runs: 1
+timeout_seconds: 900
+output_directory: ../benchmarks/results/quantization_comparison_smoke
+mmap: true
+cpu_only: true

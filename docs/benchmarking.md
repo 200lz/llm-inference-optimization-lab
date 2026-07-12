@@ -64,3 +64,13 @@ Normalized CSV is generated automatically only after all required measured invoc
 Debug builds disable or reduce optimization and may add assertions and instrumentation. Their instruction mix and timing do not represent production inference. Debug is appropriate for correctness checks only; use a reproducible Release build for performance conclusions and record its exact commit and build configuration.
 
 Smoke mode does not execute `llama-bench`. It parses a deterministic checked-in fixture and exercises matrix expansion, warm-up filtering, raw JSONL, and normalized CSV creation. It proves pipeline wiring, not performance or binary compatibility.
+
+## Phase 5 multi-model comparison
+
+`configs/quantization_comparison.yaml` uses a focused union of five workload cases for each of F16, Q8_0, and Q4_K_M. Model logical ID prefixes every invocation ID, so resume cannot treat one quantization as another. Raw records and normalized rows include logical ID, filename, quantization, SHA-256, and exact file size. The configuration fingerprint includes the complete ordered model list.
+
+The deduplicated plan is 15 model/workload cases, 15 warm-ups, 75 measured repetitions, and 90 total subprocess invocations. Each subprocess has a 900-second timeout; the matrix has no default whole-run timeout. Results go under the ignored `benchmarks/results/quantization_comparison/` directory.
+
+The deterministic suite uses `llama-cli`, the model chat template, greedy decoding (`--temp 0`), seed 42, a fixed maximum generation length, and identical CPU-only flags. Raw output is append-only and resumable. Token-level agreement is omitted because this pinned `llama-cli` does not provide generated token IDs as a reliable machine-readable stream separate from rendered chat output.
+
+Peak RSS is intentionally omitted. Wrapping only Phase 5 commands with `/usr/bin/time -v` would complicate the exact-command interface, while RSS with file-backed mmap does not equal model size, does not capture shared page-cache behavior exactly, and WSL2 accounting can differ from native Linux. This omission does not block storage and throughput comparisons.

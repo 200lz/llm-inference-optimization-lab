@@ -1,0 +1,18 @@
+executable: ../third_party/llama.cpp/build-release/bin/llama-cli
+models:
+  - {id: qwen2.5-0.5b-instruct-f16, path: ../models/qwen2.5-0.5b-instruct-fp16.gguf, quantization: F16}
+  - {id: qwen2.5-0.5b-instruct-q8_0, path: ../models/qwen2.5-0.5b-instruct-q8_0.gguf, quantization: Q8_0}
+  - {id: qwen2.5-0.5b-instruct-q4_k_m, path: ../models/qwen2.5-0.5b-instruct-q4_k_m.gguf, quantization: Q4_K_M}
+output_directory: ../benchmarks/results/quantization_quality
+timeout_seconds: 300
+seed: 42
+temperature: 0
+max_generated_tokens: 128
+threads: 4
+prompts:
+  - {id: factual, text: "What is the capital of Japan? Answer in one short sentence."}
+  - {id: arithmetic, text: "A box contains 12 red balls and 8 blue balls. If 5 red balls are removed, how many balls remain? Explain briefly."}
+  - {id: code, text: "Write a C++ function that returns the maximum element in a std::vector<int>. Return only the code."}
+  - {id: multilingual_zh, text: "请用中文简要解释什么是大语言模型的量化。"}
+  - {id: japanese, text: "大規模言語モデルの推論における量子化の利点を日本語で簡潔に説明してください。"}
+  - {id: continuation, text: "Large language model inference serves user requests in two stages: prompt processing builds the key-value cache, and autoregressive decoding produces tokens sequentially. Quantization stores weights at lower precision and may change storage, memory traffic, kernel behavior, and output tokens. Summarize this context in two concise sentences without adding new claims."}

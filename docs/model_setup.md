@@ -1,5 +1,17 @@
 # Baseline model setup
 
+## Phase 5 quantization artifacts
+
+Phase 5 uses F16, Q8_0, and Q4_K_M files from the same official `Qwen/Qwen2.5-0.5B-Instruct-GGUF` repository at immutable revision `9217f5db79a29953eb74d5343926648285ec7e67`. Exact filenames, byte sizes, SHA-256 values, base-model identity, and parameter count are recorded in `configs/models/quantization_models.yaml`.
+
+Download or verify all three with:
+
+```console
+.venv/bin/python scripts/download_model.py --config configs/models/quantization_models.yaml
+```
+
+Downloads stream into `.part` files and resume with HTTP Range requests. Existing files are hashed before reuse. Stored sidecar metadata contains no absolute local path, and any identity, byte-size, or checksum mismatch is a hard error.
+
 The CPU baseline uses the official **Qwen2.5-0.5B-Instruct GGUF** release. It is a small, public, instruction-tuned model suitable for repeated CPU measurements.
 
 - Source repository: `Qwen/Qwen2.5-0.5B-Instruct-GGUF`

@@ -25,7 +25,7 @@ Testing/
 
 # Models
 *.gguf
-models/
+/models/
 
 # Generated benchmark results
 benchmarks/results/

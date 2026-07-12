@@ -1,0 +1,35 @@
+schema_version: 1
+models:
+  f16:
+    logical_id: qwen2.5-0.5b-instruct-f16
+    quantization: F16
+    source_repository: Qwen/Qwen2.5-0.5B-Instruct-GGUF
+    source_filename: qwen2.5-0.5b-instruct-fp16.gguf
+    local_filename: qwen2.5-0.5b-instruct-fp16.gguf
+    byte_size: 1266425696
+    sha256: 8e0ae26000627ed62de0e78e41860af70094558b9d2913385c842a6aa06cf3fc
+    base_model_name: Qwen/Qwen2.5-0.5B-Instruct
+    parameter_count: 494032768
+    source_revision: 9217f5db79a29953eb74d5343926648285ec7e67
+  q8_0:
+    logical_id: qwen2.5-0.5b-instruct-q8_0
+    quantization: Q8_0
+    source_repository: Qwen/Qwen2.5-0.5B-Instruct-GGUF
+    source_filename: qwen2.5-0.5b-instruct-q8_0.gguf
+    local_filename: qwen2.5-0.5b-instruct-q8_0.gguf
+    byte_size: 675710816
+    sha256: ca59ca7f13d0e15a8cfa77bd17e65d24f6844b554a7b6c12e07a5f89ff76844e
+    base_model_name: Qwen/Qwen2.5-0.5B-Instruct
+    parameter_count: 494032768
+    source_revision: 9217f5db79a29953eb74d5343926648285ec7e67
+  q4_k_m:
+    logical_id: qwen2.5-0.5b-instruct-q4_k_m
+    quantization: Q4_K_M
+    source_repository: Qwen/Qwen2.5-0.5B-Instruct-GGUF
+    source_filename: qwen2.5-0.5b-instruct-q4_k_m.gguf
+    local_filename: qwen2.5-0.5b-instruct-q4_k_m.gguf
+    byte_size: 491400032
+    sha256: 74a4da8c9fdbcd15bd1f6d01d621410d31c6fc00986f5eb687824e7b93d7a9db
+    base_model_name: Qwen/Qwen2.5-0.5B-Instruct
+    parameter_count: 494032768
+    source_revision: 9217f5db79a29953eb74d5343926648285ec7e67
