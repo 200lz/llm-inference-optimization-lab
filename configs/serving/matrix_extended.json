@@ -1,0 +1,116 @@
+{
+  "schema_version": "serving-matrix-v1",
+  "evidence_type": "SIMULATED",
+  "max_default_runs": 24,
+  "command_manifest": "results/serving/extended_command_manifest.json",
+  "comparisons": {
+    "scheduler": {
+      "configs": [
+        "fcfs_chat_small",
+        "continuous_chat_small",
+        "fcfs_chat_continuous",
+        "single_active_fcfs_mixed",
+        "decode_first",
+        "fcfs_mixed",
+        "fcfs_overload",
+        "overload_decode_first",
+        "mixed_overload_fcfs_mixed"
+      ],
+      "metrics": [
+        "ttft",
+        "e2e",
+        "throughput",
+        "goodput",
+        "batch_size"
+      ]
+    },
+    "prefix_cache": {
+      "configs": [
+        "shared_prefix_cache_off",
+        "shared_prefix_cache_on",
+        "coding_agent_prefix_off",
+        "coding_agent_prefix_on",
+        "mixed_prefix_cache_off",
+        "mixed_prefix_cache_on"
+      ],
+      "metrics": [
+        "scheduled_prefill_tokens",
+        "matched_tokens",
+        "prefix_token_hit_rate",
+        "kv_peak_usage",
+        "ttft",
+        "throughput",
+        "eviction_count"
+      ]
+    },
+    "kv_capacity": {
+      "configs": [
+        "kv_small",
+        "kv_medium",
+        "kv_large"
+      ],
+      "metrics": [
+        "kv_capacity_deferrals",
+        "stalled_iterations",
+        "completion_rate",
+        "tail_latency",
+        "peak_utilization"
+      ]
+    },
+    "block_size": {
+      "configs": [
+        "block_size_8",
+        "block_size_16",
+        "block_size_32"
+      ],
+      "metrics": [
+        "internal_fragmentation",
+        "allocated_blocks",
+        "kv_capacity_deferrals",
+        "prefix_reuse_granularity",
+        "evictions"
+      ]
+    },
+    "load_sweep": {
+      "configs": [
+        "mixed_low_load",
+        "mixed_medium_load",
+        "mixed_overload"
+      ],
+      "metrics": [
+        "arrival_rate",
+        "throughput",
+        "p99_ttft",
+        "queue_delay",
+        "goodput_ratio",
+        "stalled_iterations"
+      ]
+    }
+  },
+  "configs": [
+    "configs/serving/fcfs_chat_small.json",
+    "configs/serving/continuous_chat_small.json",
+    "configs/serving/fcfs_chat_continuous.json",
+    "configs/serving/shared_prefix_cache_off.json",
+    "configs/serving/shared_prefix_cache_on.json",
+    "configs/serving/coding_agent_prefix_on.json",
+    "configs/serving/coding_agent_prefix_off.json",
+    "configs/serving/mixed_prefix_cache_off.json",
+    "configs/serving/mixed_prefix_cache_on.json",
+    "configs/serving/kv_small.json",
+    "configs/serving/kv_medium.json",
+    "configs/serving/kv_large.json",
+    "configs/serving/block_size_8.json",
+    "configs/serving/block_size_16.json",
+    "configs/serving/block_size_32.json",
+    "configs/serving/mixed_low_load.json",
+    "configs/serving/mixed_medium_load.json",
+    "configs/serving/mixed_overload.json",
+    "configs/serving/decode_first.json",
+    "configs/serving/fcfs_mixed.json",
+    "configs/serving/single_active_fcfs_mixed.json",
+    "configs/serving/fcfs_overload.json",
+    "configs/serving/mixed_overload_fcfs_mixed.json"
+    ,"configs/serving/overload_decode_first.json"
+  ]
+}

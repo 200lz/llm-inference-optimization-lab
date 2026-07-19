@@ -1,0 +1,1 @@
+{"schema_version":"serving-workload-v1","workload_class":"burst","request_count":8,"seed":20260719,"arrival":{"mode":"burst","start_time_us":0}}

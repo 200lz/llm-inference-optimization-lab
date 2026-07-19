@@ -1,0 +1,38 @@
+{
+  "evidence_type": "SIMULATED",
+  "matrix": "configs/serving/matrix_small.json",
+  "runs": [
+    {
+      "config": "configs/serving/fcfs_chat_small.json",
+      "result": "results/serving/raw/fcfs_chat_small.jsonl"
+    },
+    {
+      "config": "configs/serving/continuous_chat_small.json",
+      "result": "results/serving/raw/continuous_chat_small.jsonl"
+    },
+    {
+      "config": "configs/serving/shared_prefix_cache_off.json",
+      "result": "results/serving/raw/shared_prefix_cache_off.jsonl"
+    },
+    {
+      "config": "configs/serving/shared_prefix_cache_on.json",
+      "result": "results/serving/raw/shared_prefix_cache_on.jsonl"
+    },
+    {
+      "config": "configs/serving/kv_small.json",
+      "result": "results/serving/raw/kv_small.jsonl"
+    },
+    {
+      "config": "configs/serving/kv_large.json",
+      "result": "results/serving/raw/kv_large.jsonl"
+    },
+    {
+      "config": "configs/serving/mixed_low_load.json",
+      "result": "results/serving/raw/mixed_low_load.jsonl"
+    },
+    {
+      "config": "configs/serving/mixed_overload.json",
+      "result": "results/serving/raw/mixed_overload.jsonl"
+    }
+  ]
+}
