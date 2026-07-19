@@ -810,6 +810,8 @@ ContinuousBatchingEngine::prepare_iteration(
                               prepared_kv_cache.represented_token_count(),
                               prepared_kv_cache.internal_fragmentation_tokens(),
                               prepared_kv_cache.utilization(),
+                              prepared_kv_cache.cached_block_count(),
+                              prepared_kv_cache.referenced_shared_block_count(),
                               prepared_kv_cache.block_tables()};
   if (fail_trace_preparation_for_test_) {
     throw std::runtime_error("injected trace preparation failure");

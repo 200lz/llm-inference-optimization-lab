@@ -49,6 +49,14 @@ target_compile_options(prefix-cache-smoke PRIVATE
   $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic>
 )
 
+add_executable(serving-benchmark-runner
+  src/serving/serving_benchmark_runner.cpp
+)
+target_link_libraries(serving-benchmark-runner PRIVATE llm_lab_serving)
+target_compile_options(serving-benchmark-runner PRIVATE
+  $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic>
+)
+
 add_library(q4_hotpath_kernels
   kernels/q4_hotpath/reference/q6_q8_reference.cpp
   kernels/q4_hotpath/baseline/q6_q8_baseline.cpp
