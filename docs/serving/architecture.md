@@ -9,8 +9,10 @@ The simulator is useful on a CPU-only WSL2 host because scheduler and cache poli
 This design borrows concepts used by vLLM- and SGLang-style systems—iteration-level scheduling, continuous batching, paged/block-oriented KV storage, prefix reuse, preemption, and workload-level serving metrics. It is an educational model of those concepts, not an implementation of either project and not a claim of feature or performance parity.
 
 Phase S2 implements the deterministic single-active FCFS subset of this design.
-The block cache, continuous batching, prefix cache, preemption, workload replay,
-and llama.cpp adapter shown here remain future architecture.
+Phase S3 adds a separate deterministic `ContinuousBatchingEngine` for
+iteration-level multiple-active execution while preserving that reference path.
+The block cache, prefix cache, preemption, workload replay, and llama.cpp
+adapter shown here remain future architecture.
 
 ## System context
 
@@ -58,7 +60,7 @@ stateDiagram-v2
 
 ## Core abstractions
 
-### Scheduler
+### Scheduler and execution modes
 
 The Phase S2 `Scheduler` receives immutable request IDs and arrival timestamps
 through lifecycle notifications and returns an explicit admission decision. It
@@ -68,15 +70,34 @@ cache capacity, and backend limits and will expand decisions to prefill chunks,
 decode steps, and preemptions. Stable request ID breaks all policy ties.
 
 - `FcfsScheduler` orders by `(arrival_time, request_id)`, never bypasses a capacity-blocked head request, and runs admitted work without policy preemption. This intentionally exposes head-of-line blocking as the simple reference policy; requests that can never fit are rejected during validation.
-- `ContinuousBatchingScheduler` revisits the batch after every backend iteration, fills freed slots immediately, mixes configured prefill chunks with one-token decode steps, and may preempt a deterministic victim when KV capacity would otherwise block progress. Its initial victim rule is largest allocated private-block footprint, then newest admission, then request ID.
+- Phase S3 deliberately does not retrofit the event-oriented scheduler
+  interface. `ContinuousBatchingEngine` constructs immutable plans for either
+  `DecodeFirst` or `FcfsMixed`, executes full prefills and one-token decode
+  steps atomically per iteration, and records a deterministic trace. It has no
+  cache-capacity input or preemption. A future cache-aware scheduler can receive
+  block pressure after the Phase S4 KV manager exists.
 
-Policy configuration records maximum sequences, maximum tokens per iteration, prefill chunk size, cache watermarks, and preemption mode. Scheduler logic must depend only on the snapshot and configuration so it can be unit-tested independently.
+Phase S3 policy configuration records maximum sequences and maximum tokens per
+iteration. Prefill chunk size, cache watermarks, and preemption mode remain
+future configuration.
+
+The Phase S3 sequence limit counts only work selected for the current
+iteration; it is not resident decode or KV capacity. Its engine prepares
+request, statistic, time, and trace results transactionally before publishing
+one iteration. Synchronous cancellation likewise preflights all throwing work
+before mutation.
 
 ### Backend
 
-`Backend` exposes capabilities and submits a `BatchPlan`; scheduler code never calls llama.cpp APIs.
+The Phase S2 `Backend` exposes separate prefill/decode estimates. The Phase S3
+engine borrows `SimulatedBackend` for its mixed-batch estimate. A future
+generalized backend may accept `BatchPlan` directly; scheduler code never calls
+llama.cpp APIs.
 
-- `SimulatedBackend` computes integer-duration events from explicit cost-model parameters. The initial model separates fixed batch overhead, prefill cost as a function of uncached prompt tokens and batch shape, and decode cost as a function of active sequences and context lengths. It produces deterministic token IDs or token ordinals; it does not execute a model.
+- `SimulatedBackend` computes integer durations from explicit cost parameters.
+  S3 adds a checked linear mixed-batch estimate from prefill tokens, decode
+  sequence count, and scheduled sequence count while preserving the S1/S2
+  APIs. The backend does not execute a model.
 - `LlamaCppBackend` is a future adapter outside the pinned submodule. It will translate plans to supported llama.cpp batching/context operations and report monotonic-clock observations. Adapter limitations must be surfaced as capabilities rather than emulated invisibly.
 
 An analytical cost calculation may be used inside `SimulatedBackend`, but an analytical estimate remains distinct from the resulting discrete-event experiment; both carry provenance as defined below.

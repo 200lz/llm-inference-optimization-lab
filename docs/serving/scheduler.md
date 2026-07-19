@@ -8,6 +8,11 @@ scheduling behavior. It uses one active request, no threads, and no wall clock.
 It does not implement continuous batching, preemption, a KV or prefix cache,
 model execution, or accelerator measurement.
 
+Phase S3 preserves this interface and policy unchanged. The separate
+`ContinuousBatchingEngine`, its `DecodeFirst` and `FcfsMixed` policies, strict
+per-iteration budgets, budget-aware FCFS traversal, and immutable plans are documented in
+[continuous batching](continuous_batching.md).
+
 ## Responsibility boundary
 
 The scheduler owns only immutable scheduling metadata keyed by request ID. It
@@ -100,10 +105,9 @@ Waiting cancellation contributes no queue-wait duration because it is never
 admitted. Counts are cumulative; current waiting and running counts are exposed
 separately. Signed 64-bit queue-wait accumulation uses checked arithmetic.
 
-## Phase S3 handoff
+## Phase S3 additive path
 
-Phase S3 can extend admission to several active requests and add iteration-level
-continuous batching. That work must define how batch capacity, prefill chunks,
-and completion boundaries interact; none of those behaviors are approximated
-in Phase S2. The output here remains simulation evidence and produces no real
-accelerator performance measurement.
+Phase S3 adds several active requests and iteration-level continuous batching
+without changing S2 admission. It uses whole prefills because chunked prefill
+is deferred, and defines completion at atomic iteration boundaries. Both paths
+remain simulation evidence and produce no real accelerator measurement.

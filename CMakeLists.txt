@@ -17,6 +17,7 @@ target_compile_options(native_smoke PRIVATE
 )
 
 add_library(llm_lab_serving
+  src/serving/continuous_batching.cpp
   src/serving/fcfs_scheduler.cpp
   src/serving/request.cpp
   src/serving/simulated_backend.cpp
@@ -30,6 +31,14 @@ target_compile_options(llm_lab_serving PRIVATE
 add_executable(serving-sim-smoke src/serving/serving_sim_smoke.cpp)
 target_link_libraries(serving-sim-smoke PRIVATE llm_lab_serving)
 target_compile_options(serving-sim-smoke PRIVATE
+  $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic>
+)
+
+add_executable(continuous-batching-smoke
+  src/serving/continuous_batching_smoke.cpp
+)
+target_link_libraries(continuous-batching-smoke PRIVATE llm_lab_serving)
+target_compile_options(continuous-batching-smoke PRIVATE
   $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic>
 )
 
@@ -81,9 +90,18 @@ if(BUILD_TESTING)
     $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic>
   )
 
+  add_executable(continuous_batching_tests
+    tests/serving/test_continuous_batching.cpp
+  )
+  target_link_libraries(continuous_batching_tests PRIVATE llm_lab_serving)
+  target_compile_options(continuous_batching_tests PRIVATE
+    $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic>
+  )
+
   add_test(NAME native_smoke COMMAND native_smoke)
   add_test(NAME serving_simulator COMMAND serving_tests)
   add_test(NAME serving_scheduler COMMAND serving_scheduler_tests)
+  add_test(NAME serving_continuous_batching COMMAND continuous_batching_tests)
   add_test(NAME kernel_q4_hotpath_correctness COMMAND kernel_q4_hotpath_test)
   add_test(NAME q8_rn2_scale_correctness COMMAND q8_rn2_scale_test)
 endif()
