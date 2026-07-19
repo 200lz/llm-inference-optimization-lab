@@ -202,6 +202,8 @@ bool same_trace(const std::vector<BatchTraceEntry>& a,
         a[i].free_kv_blocks != b[i].free_kv_blocks ||
         a[i].represented_kv_tokens != b[i].represented_kv_tokens ||
         a[i].internal_fragmentation_tokens != b[i].internal_fragmentation_tokens ||
+        a[i].cached_kv_blocks != b[i].cached_kv_blocks ||
+        a[i].referenced_shared_kv_blocks != b[i].referenced_shared_kv_blocks ||
         a[i].kv_block_utilization != b[i].kv_block_utilization ||
         a[i].kv_block_tables != b[i].kv_block_tables) return false;
   }
