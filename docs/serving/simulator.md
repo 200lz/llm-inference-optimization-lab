@@ -8,6 +8,9 @@ completion, and explicit cancellation. Admission is delegated to the formal
 `Scheduler` interface; the current policy is FCFS. See [scheduler](scheduler.md)
 for its API, ordering, statistics, and responsibility boundary.
 
+Phase S3 does not change this engine. Its separate iteration-level execution
+path is documented in [continuous batching](continuous_batching.md).
+
 Public timestamps are signed 64-bit integer microseconds with `_us` suffixes.
 `SimulationClock` starts at zero and jumps to event timestamps. It never reads a
 wall clock or sleeps. All output is simulated behavior, not measured llama.cpp,

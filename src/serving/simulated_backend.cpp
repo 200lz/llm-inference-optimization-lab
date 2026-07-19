@@ -55,9 +55,42 @@ void SimulatedBackend::validate_configuration() const {
   if (config_.prefill_base_us < 0 || config_.prefill_per_token_us < 0 ||
       config_.prefill_per_active_sequence_us < 0 ||
       config_.decode_base_us < 0 ||
-      config_.decode_per_active_sequence_us < 0) {
+      config_.decode_per_active_sequence_us < 0 ||
+      config_.batch_base_us < 0 ||
+      config_.batch_prefill_per_token_us < 0 ||
+      config_.batch_decode_per_sequence_us < 0 ||
+      config_.batch_active_sequence_overhead_us < 0) {
     throw std::invalid_argument("simulated backend costs must be non-negative");
   }
+}
+
+std::int64_t SimulatedBackend::estimate_batch_time_us(
+    std::uint64_t total_prefill_tokens,
+    std::uint64_t decode_sequence_count,
+    std::uint64_t total_scheduled_sequences) const {
+  if (total_scheduled_sequences == 0) {
+    throw std::invalid_argument("mixed batch must schedule a sequence");
+  }
+  if (decode_sequence_count > total_scheduled_sequences) {
+    throw std::invalid_argument(
+        "decode sequence count exceeds scheduled sequence count");
+  }
+  const auto prefill = checked_count(total_prefill_tokens,
+                                     "batch prefill token count overflow");
+  const auto decode = checked_count(decode_sequence_count,
+                                    "batch decode sequence count overflow");
+  const auto sequences = checked_count(total_scheduled_sequences,
+                                       "batch sequence count overflow");
+  const auto prefill_cost = checked_multiply(
+      config_.batch_prefill_per_token_us, prefill);
+  const auto decode_cost = checked_multiply(
+      config_.batch_decode_per_sequence_us, decode);
+  const auto sequence_cost = checked_multiply(
+      config_.batch_active_sequence_overhead_us, sequences);
+  return checked_add(
+      checked_add(checked_add(config_.batch_base_us, prefill_cost),
+                  decode_cost),
+      sequence_cost);
 }
 
 std::int64_t SimulatedBackend::estimate_prefill_us(
