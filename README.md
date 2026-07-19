@@ -17,7 +17,14 @@ The serving track is a dependency-free C++17 simulator with Python workload and 
 Together, the tracks keep three boundaries explicit: real kernel measurements, extracted microbenchmark results, and modeled serving behavior are not interchangeable.
 
 ## Results
+## Key implementation files
 
+- [Continuous batching API](include/serving/continuous_batching.h)
+- [Continuous batching engine](src/serving/continuous_batching.cpp)
+- [KV and prefix-cache API](include/serving/kv_cache.h)
+- [KV and prefix-cache implementation](src/serving/kv_cache.cpp)
+- [Machine-readable benchmark runner](src/serving/serving_benchmark_runner.cpp)
+- [Serving workload and metrics tools](benchmarks/serving/)
 ### Measured CPU inference highlights
 
 | Evidence | Result | Scope |
@@ -88,7 +95,15 @@ versioned JSONL -> Python validation -> strict temporary TSV
   -> C++ FCFS or continuous engine -> typed JSONL records
   -> Python reconciliation, metrics, and provenance
 ```
-
+flowchart LR
+    A[Requests] --> B[FCFS / Continuous Scheduler]
+    B --> C[Batch Plan]
+    C --> D[Simulated Backend]
+    B --> E[KV Cache Manager]
+    E --> F[Prefix Cache + LRU]
+    D --> G[Request Metrics]
+    F --> G
+    
 ## Quick start
 
 Run commands from the repository root in Linux/WSL2.
@@ -191,6 +206,15 @@ The serving layer makes execution control visible: arrivals, admission, iteratio
 
 The same concerns matter when a compiler, runtime, and accelerator must coordinate executable programs and memory residency. Useful policies depend on target program costs, launch behavior, supported shapes, memory capacity/bandwidth, and runtime constraints. Applying this simulator to GPU or MN-Core-like hardware would therefore require public target-specific measurement and cost-model calibration; no proprietary MN-Core knowledge is assumed.
 
+## What this project demonstrates
+
+- C++17 systems programming and lifecycle design
+- Deterministic request scheduling and continuous batching
+- KV-cache ownership, capacity accounting, and fragmentation analysis
+- Prefix-cache hashing, collision verification, reference counting, and LRU
+- Strong exception guarantees and invariant-driven testing
+- Workload design and service-level performance analysis
+- Clear separation between measured, simulated, and inconclusive evidence
 ## Limitations
 
 ### CPU study
