@@ -15,6 +15,18 @@
 #include <utility>
 #include <vector>
 
+namespace llm_lab::serving::test {
+
+struct SimulationEngineTestAccess {
+  static void inject_event(SimulationEngine& engine,
+                           std::int64_t timestamp_us, RequestId request_id,
+                           EventType type) {
+    (void)engine.events_.schedule(timestamp_us, request_id, type);
+  }
+};
+
+}  // namespace llm_lab::serving::test
+
 namespace {
 
 using llm_lab::serving::Event;
@@ -26,6 +38,7 @@ using llm_lab::serving::RequestId;
 using llm_lab::serving::RequestState;
 using llm_lab::serving::SimulatedBackend;
 using llm_lab::serving::SimulationEngine;
+using llm_lab::serving::SimulationEngineConfig;
 
 static_assert(
     std::is_constructible_v<SimulationEngine, const SimulatedBackend&>,
@@ -33,6 +46,10 @@ static_assert(
 static_assert(
     !std::is_constructible_v<SimulationEngine, SimulatedBackend&&>,
     "SimulationEngine must reject a temporary backend");
+static_assert(
+    !std::is_constructible_v<SimulationEngine, SimulatedBackend&&,
+                             SimulationEngineConfig>,
+    "configured SimulationEngine must reject a temporary backend");
 
 class ThrowingDecodeBackend final : public Backend {
  public:
@@ -77,12 +94,18 @@ void test_single_request_lifecycle_and_time_zero() {
   const Request& request = engine.request({1});
   require(request.state == RequestState::Finished, "request did not finish");
   require(request.arrival_time_us == 0, "arrival at time zero changed");
-  require(request.admitted_time_us == 0, "request was not admitted at zero");
-  require(request.first_scheduled_time_us == 0,
+  require(request.admitted_time_us.has_value(), "request has no admission time");
+  require(*request.admitted_time_us == 0, "request was not admitted at zero");
+  require(request.first_scheduled_time_us.has_value(),
+          "request has no first scheduled time");
+  require(*request.first_scheduled_time_us == 0,
           "request was not first scheduled at zero");
-  require(request.first_token_time_us == 22,
+  require(request.first_token_time_us.has_value(),
+          "request has no first-token time");
+  require(*request.first_token_time_us == 22,
           "unexpected first-token timestamp");
-  require(request.finish_time_us == 27, "unexpected finish timestamp");
+  require(request.finish_time_us.has_value(), "request has no finish time");
+  require(*request.finish_time_us == 27, "unexpected finish timestamp");
   require(request.generated_token_count == 2, "wrong generated token count");
   require(!engine.failed(), "successful engine reported failure");
   require(engine.processed_event_count() == engine.event_log().size(),
@@ -140,9 +163,14 @@ void test_first_token_assigned_once() {
   engine.run();
 
   const auto& request = engine.request({1});
-  require(request.first_token_time_us == 18,
+  require(request.first_token_time_us.has_value(),
+          "multi-token request has no first-token time");
+  require(*request.first_token_time_us == 18,
           "first-token timestamp was overwritten by a later decode step");
-  require(request.finish_time_us == 28, "unexpected multi-token finish time");
+  require(request.finish_time_us.has_value(),
+          "multi-token request has no finish time");
+  require(*request.finish_time_us == 28,
+          "unexpected multi-token finish time");
 }
 
 void test_event_ordering_is_stable() {
@@ -303,7 +331,7 @@ void test_checked_arithmetic() {
       "backend cost overflow was not detected");
 }
 
-void test_fifo_and_later_arrival() {
+void test_fcfs_and_later_arrival() {
   const auto backend = standard_backend();
   SimulationEngine engine(backend);
   engine.submit_request(Request({20}, 0, 5, 2));
@@ -321,24 +349,24 @@ void test_fifo_and_later_arrival() {
               later.admitted_time_us.has_value() &&
               later.finish_time_us.has_value(),
           "FIFO scenario has a missing lifecycle timestamp");
-  require(*first.admitted_time_us == 0 && *first.finish_time_us == 31,
-          "first FIFO request has unexpected timestamps");
-  require(*second.admitted_time_us == 31 && *second.finish_time_us == 49,
-          "second FIFO request has unexpected timestamps");
+  require(*second.admitted_time_us == 0 && *second.finish_time_us == 18,
+          "request-ID tie-break winner has unexpected timestamps");
+  require(*first.admitted_time_us == 18 && *first.finish_time_us == 49,
+          "second FCFS request has unexpected timestamps");
   require(*later.admitted_time_us == 49 && *later.finish_time_us == 65,
-          "later FIFO request has unexpected timestamps");
-  require(*second.admitted_time_us >= *first.finish_time_us,
-          "second FIFO request was admitted before the first finished");
-  require(*second.admitted_time_us < *later.admitted_time_us,
-          "request ID replaced FIFO arrival order");
+          "later FCFS request has unexpected timestamps");
+  require(*first.admitted_time_us >= *second.finish_time_us,
+          "second FCFS request was admitted before the first finished");
+  require(*first.admitted_time_us < *later.admitted_time_us,
+          "later arrival bypassed an earlier request");
   require(*later.admitted_time_us >= later.arrival_time_us,
           "request executed before arrival");
-  require(*later.admitted_time_us == *second.finish_time_us,
+  require(*later.admitted_time_us == *first.finish_time_us,
           "later arrival did not wait behind active work");
 
   bool first_completed = false;
   for (const Event& event : engine.event_log()) {
-    if (event.request_id != RequestId{20}) {
+    if (event.request_id != RequestId{10}) {
       continue;
     }
     require(!first_completed, "finished request was scheduled again");
@@ -347,7 +375,279 @@ void test_fifo_and_later_arrival() {
     }
   }
   require(first_completed, "first request had no completion event");
-  require(engine.event_queue_empty(), "events remain after FIFO scenario");
+  require(engine.event_queue_empty(), "events remain after FCFS scenario");
+}
+
+void test_head_of_line_blocking_and_simultaneous_id_order() {
+  const auto backend = standard_backend();
+  SimulationEngine engine(backend);
+  engine.submit_request(Request({50}, 0, 5, 2));
+  engine.submit_request(Request({20}, 1, 10, 1));
+  engine.submit_request(Request({30}, 2, 0, 0));
+  engine.run();
+
+  const auto& long_waiter = engine.request({20});
+  const auto& short_waiter = engine.request({30});
+  require(long_waiter.admitted_time_us.has_value() &&
+              long_waiter.finish_time_us.has_value() &&
+              short_waiter.admitted_time_us.has_value(),
+          "head-of-line scenario is missing timestamps");
+  require(*long_waiter.admitted_time_us == 31 &&
+              *long_waiter.finish_time_us == 67 &&
+              *short_waiter.admitted_time_us == 67,
+          "later short request bypassed earlier long request");
+
+  SimulationEngine tied(backend);
+  tied.submit_request(Request({9}, 0, 0, 0));
+  tied.submit_request(Request({2}, 0, 0, 0));
+  tied.run();
+  const auto& lower_id = tied.request({2});
+  const auto& higher_id = tied.request({9});
+  require(lower_id.admitted_time_us.has_value() &&
+              higher_id.admitted_time_us.has_value(),
+          "simultaneous requests were not admitted");
+  require(*lower_id.admitted_time_us == 0 &&
+              *higher_id.admitted_time_us == 11,
+          "simultaneous arrivals did not use request ID order");
+}
+
+void test_waiting_and_future_arrival_cancellation() {
+  const auto backend = standard_backend();
+  SimulationEngine engine(backend);
+  engine.submit_request(Request({1}, 0, 4, 2));
+  engine.submit_request(Request({2}, 0, 1, 1));
+  require(engine.run_next_timestamp(), "arrival timestamp was not processed");
+  require(engine.scheduler_waiting_count() == 1,
+          "second request is not waiting");
+  engine.cancel_request({2});
+  engine.run();
+
+  const auto& cancelled = engine.request({2});
+  require(cancelled.state == RequestState::Cancelled,
+          "waiting request did not become Cancelled");
+  require(cancelled.finish_time_us.has_value() &&
+              *cancelled.finish_time_us == 0,
+          "waiting cancellation has wrong finish time");
+  require(!cancelled.admitted_time_us.has_value(),
+          "waiting cancelled request was admitted");
+  require(cancelled.generated_token_count == 0,
+          "waiting cancelled request generated tokens");
+
+  SimulationEngine future(backend);
+  future.submit_request(Request({8}, 5, 1, 1));
+  future.cancel_request({8});
+  future.run();
+  const auto& future_cancelled = future.request({8});
+  require(future_cancelled.state == RequestState::Cancelled &&
+              future_cancelled.finish_time_us.has_value() &&
+              *future_cancelled.finish_time_us == 0,
+          "future-arrival cancellation has wrong terminal state");
+  require(future.ignored_cancelled_event_count() == 1,
+          "stale future arrival was not counted");
+  require(future.event_log().empty(),
+          "ignored future arrival entered the successful event log");
+  const auto& statistics = future.scheduler_statistics();
+  require(statistics.arrived_request_count == 0 &&
+              statistics.cancelled_request_count == 1,
+          "future cancellation scheduler statistics are wrong");
+}
+
+void test_active_cancellation_and_stale_events() {
+  const auto backend = standard_backend();
+
+  SimulationEngine prefill(backend);
+  prefill.submit_request(Request({1}, 0, 2, 2));
+  require(prefill.run_next_timestamp(), "prefill arrival was not processed");
+  require(prefill.request({1}).state == RequestState::Prefilling,
+          "request did not enter prefill");
+  prefill.cancel_request({1});
+  const std::size_t prefill_log_size = prefill.event_log().size();
+  prefill.run();
+  require(prefill.request({1}).generated_token_count == 0,
+          "prefill-cancelled request generated a token");
+  require(prefill.ignored_cancelled_event_count() == 1,
+          "stale prefill completion was not counted");
+  require(prefill.event_queue_empty(),
+          "stale prefill completion did not drain");
+  require(prefill.event_log().size() == prefill_log_size,
+          "ignored prefill completion entered the successful event log");
+
+  SimulationEngine decode(backend);
+  decode.submit_request(Request({1}, 0, 1, 3));
+  require(decode.run_next_timestamp(), "decode arrival was not processed");
+  require(decode.run_next_timestamp(), "prefill completion was not processed");
+  require(decode.request({1}).state == RequestState::Decoding,
+          "request did not enter decode");
+  require(decode.run_next_timestamp(), "first decode step was not processed");
+  require(decode.request({1}).generated_token_count == 1,
+          "first decode token was not generated");
+  decode.cancel_request({1});
+  const std::size_t decode_log_size = decode.event_log().size();
+  decode.run();
+  const auto& cancelled = decode.request({1});
+  require(cancelled.state == RequestState::Cancelled &&
+              cancelled.finish_time_us.has_value(),
+          "decode cancellation is not terminal");
+  require(cancelled.generated_token_count == 1,
+          "decode-cancelled request produced an additional token");
+  require(decode.ignored_cancelled_event_count() == 1,
+          "stale decode event was not counted");
+  require(decode.event_log().size() == decode_log_size,
+          "ignored decode event entered the successful event log");
+}
+
+void test_cancelled_event_authorization_is_exact() {
+  const auto backend = standard_backend();
+  SimulationEngine engine(backend);
+  engine.submit_request(Request({1}, 0, 2, 2));
+  require(engine.run_next_timestamp(), "arrival timestamp was not processed");
+  llm_lab::serving::test::SimulationEngineTestAccess::inject_event(
+      engine, 15, {1}, EventType::PrefillComplete);
+  engine.cancel_request({1});
+  require_throws<std::logic_error>(
+      [&] { engine.run(); },
+      "duplicate event for cancelled request was silently ignored");
+  require(engine.failed(), "duplicate cancelled event did not fail engine");
+  require(engine.ignored_cancelled_event_count() == 1,
+          "legitimate cancelled event was not ignored exactly once");
+  require(engine.processed_event_count() == 1,
+          "ignored or corrupt event entered successful event log");
+}
+
+void test_arbitrary_and_finished_stale_events_fail() {
+  const auto backend = standard_backend();
+
+  SimulationEngine arbitrary(backend);
+  arbitrary.submit_request(Request({1}, 0, 1, 1));
+  require(arbitrary.run_next_timestamp(), "arrival timestamp was not processed");
+  llm_lab::serving::test::SimulationEngineTestAccess::inject_event(
+      arbitrary, 0, {1}, EventType::RequestArrival);
+  require_throws<std::logic_error>(
+      [&] { arbitrary.run(); }, "arbitrary stale event did not fail engine");
+  require(arbitrary.failed() &&
+              arbitrary.ignored_cancelled_event_count() == 0,
+          "arbitrary stale event used cancellation authorization");
+
+  SimulationEngine finished(backend);
+  finished.submit_request(Request({2}, 0, 0, 0));
+  finished.run();
+  const std::int64_t finish_time_us = finished.clock().now_us();
+  llm_lab::serving::test::SimulationEngineTestAccess::inject_event(
+      finished, finish_time_us, {2}, EventType::RequestComplete);
+  require_throws<std::logic_error>(
+      [&] { finished.run(); }, "finished-request stale event did not fail");
+  require(finished.failed() && finished.ignored_cancelled_event_count() == 0,
+          "finished stale event used cancellation authorization");
+}
+
+void test_cancellation_defers_for_current_timestamp_arrival() {
+  const auto backend = standard_backend();
+  SimulationEngine engine(backend);
+  engine.submit_request(Request({1}, 0, 5, 2));
+  engine.submit_request(Request({20}, 0, 0, 1));
+  require(engine.run_next_timestamp(), "initial arrivals were not processed");
+  require(engine.request({1}).state == RequestState::Prefilling &&
+              engine.scheduler_waiting_count() == 1,
+          "initial active/waiting state is wrong");
+
+  engine.submit_request(Request({10}, 0, 0, 1));
+  engine.cancel_request({1});
+  require(!engine.request({20}).admitted_time_us.has_value(),
+          "existing waiter was admitted before current-time arrival drained");
+  require(engine.scheduler_running_count() == 0,
+          "cancellation did not defer current-time admission");
+
+  require(engine.run_next_timestamp(),
+          "pending current-time arrival was not processed");
+  const auto& lower_id = engine.request({10});
+  const auto& higher_id = engine.request({20});
+  require(lower_id.state == RequestState::Prefilling &&
+              lower_id.admitted_time_us.has_value() &&
+              *lower_id.admitted_time_us == 0,
+          "lower-ID current-time arrival was not admitted first");
+  require(!higher_id.admitted_time_us.has_value(),
+          "higher-ID waiter bypassed current-time arrival");
+  engine.run();
+  require(engine.request({20}).state == RequestState::Finished,
+          "deferred higher-ID waiter did not eventually finish");
+}
+
+void test_cancellation_admits_next_and_rejections() {
+  const auto backend = standard_backend();
+  SimulationEngine engine(backend);
+  engine.submit_request(Request({1}, 0, 5, 2));
+  engine.submit_request(Request({2}, 0, 0, 1));
+  require(engine.run_next_timestamp(), "arrival timestamp was not processed");
+  engine.cancel_request({1});
+  const auto& next = engine.request({2});
+  require(next.state == RequestState::Prefilling &&
+              next.admitted_time_us.has_value() &&
+              *next.admitted_time_us == 0,
+          "active cancellation did not admit the next waiter");
+  require_throws<std::logic_error>(
+      [&] { engine.cancel_request({1}); },
+      "repeated cancellation was accepted");
+  require_throws<std::out_of_range>(
+      [&] { engine.cancel_request({999}); },
+      "unknown cancellation was accepted");
+  engine.run();
+  require(engine.request({2}).state == RequestState::Finished,
+          "replacement request did not finish");
+  require(engine.ignored_cancelled_event_count() == 1,
+          "cancelled active request event was not consumed");
+  require_throws<std::logic_error>(
+      [&] { engine.cancel_request({2}); },
+      "finished request cancellation was accepted");
+
+  const auto& statistics = engine.scheduler_statistics();
+  require(statistics.arrived_request_count == 2 &&
+              statistics.admitted_request_count == 2 &&
+              statistics.completed_request_count == 1 &&
+              statistics.cancelled_request_count == 1,
+          "active cancellation statistics are wrong");
+}
+
+void test_scheduler_statistics_exact_timestamps() {
+  const auto backend = standard_backend();
+  SimulationEngine engine(backend);
+  engine.submit_request(Request({2}, 0, 0, 1));
+  engine.submit_request(Request({1}, 0, 0, 1));
+  engine.submit_request(Request({3}, 3, 0, 1));
+  engine.run();
+
+  const auto& first = engine.request({1});
+  const auto& second = engine.request({2});
+  const auto& third = engine.request({3});
+  require(first.admitted_time_us.has_value() &&
+              second.admitted_time_us.has_value() &&
+              third.admitted_time_us.has_value(),
+          "statistics scenario is missing admission times");
+  require(*first.admitted_time_us == 0 && *second.admitted_time_us == 16 &&
+              *third.admitted_time_us == 32,
+          "statistics scenario admission timestamps are wrong");
+  const auto& statistics = engine.scheduler_statistics();
+  require(statistics.arrived_request_count == 3 &&
+              statistics.admitted_request_count == 3 &&
+              statistics.completed_request_count == 3 &&
+              statistics.cancelled_request_count == 0,
+          "scheduler cumulative counts are wrong");
+  require(statistics.maximum_waiting_queue_depth == 2,
+          "engine maximum queue depth is wrong");
+  require(statistics.total_queue_wait_time_us == 45,
+          "engine total queue wait is wrong");
+  require(engine.scheduler_waiting_count() == 0 &&
+              engine.scheduler_running_count() == 0,
+          "engine current scheduler counts are not zero");
+}
+
+void test_engine_capacity_configuration() {
+  const auto backend = standard_backend();
+  require_throws<std::invalid_argument>(
+      [&] { SimulationEngine invalid(backend, SimulationEngineConfig{0}); },
+      "zero engine scheduler capacity was accepted");
+  require_throws<std::invalid_argument>(
+      [&] { SimulationEngine invalid(backend, SimulationEngineConfig{2}); },
+      "unsupported multi-active engine capacity was accepted");
 }
 
 void test_timestamp_overflow() {
@@ -400,7 +700,21 @@ int main() {
       {"invalid inputs", test_invalid_inputs_and_backend_configuration},
       {"non-pristine requests", test_non_pristine_requests_are_rejected},
       {"checked arithmetic", test_checked_arithmetic},
-      {"FIFO and later arrival", test_fifo_and_later_arrival},
+      {"FCFS and later arrival", test_fcfs_and_later_arrival},
+      {"head-of-line and ID order",
+       test_head_of_line_blocking_and_simultaneous_id_order},
+      {"waiting and future cancellation",
+       test_waiting_and_future_arrival_cancellation},
+      {"active cancellation and stale events",
+       test_active_cancellation_and_stale_events},
+      {"exact cancelled-event authorization",
+       test_cancelled_event_authorization_is_exact},
+      {"arbitrary stale events", test_arbitrary_and_finished_stale_events_fail},
+      {"current-time cancellation admission",
+       test_cancellation_defers_for_current_timestamp_arrival},
+      {"cancellation admits next", test_cancellation_admits_next_and_rejections},
+      {"scheduler statistics", test_scheduler_statistics_exact_timestamps},
+      {"engine capacity", test_engine_capacity_configuration},
       {"timestamp overflow", test_timestamp_overflow},
       {"decode backend failure", test_decode_backend_exception_is_terminal},
   };

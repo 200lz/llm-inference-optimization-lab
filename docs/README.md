@@ -15,7 +15,8 @@ Start with the [final technical report](final_report.md) for the complete narrat
 - [Architecture](serving/architecture.md)
 - [Development plan](serving/development_plan.md)
 - [Metric definitions and evidence semantics](serving/metrics.md)
-- [Phase S1 simulator](serving/simulator.md)
+- [Phase S2 simulator](serving/simulator.md)
+- [Phase S2 scheduler and FCFS policy](serving/scheduler.md)
 
 ## Results by phase
 

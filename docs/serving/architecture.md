@@ -8,7 +8,9 @@ The simulator is useful on a CPU-only WSL2 host because scheduler and cache poli
 
 This design borrows concepts used by vLLM- and SGLang-style systems—iteration-level scheduling, continuous batching, paged/block-oriented KV storage, prefix reuse, preemption, and workload-level serving metrics. It is an educational model of those concepts, not an implementation of either project and not a claim of feature or performance parity.
 
-Phase S0 adds documentation only. It does not change `third_party/llama.cpp`, add dependencies, or create serving implementation targets.
+Phase S2 implements the deterministic single-active FCFS subset of this design.
+The block cache, continuous batching, prefix cache, preemption, workload replay,
+and llama.cpp adapter shown here remain future architecture.
 
 ## System context
 
@@ -58,7 +60,12 @@ stateDiagram-v2
 
 ### Scheduler
 
-`Scheduler` receives an immutable `SchedulingSnapshot` containing ready requests, active sequences, cache capacity, and backend limits. It returns a `SchedulingDecision`: admissions, prefill chunks, decode steps, preemptions, and the reason for each rejected candidate. Stable request ID breaks all policy ties.
+The Phase S2 `Scheduler` receives immutable request IDs and arrival timestamps
+through lifecycle notifications and returns an explicit admission decision. It
+does not own or mutate requests. The future multi-active scheduler will receive
+an immutable `SchedulingSnapshot` containing ready requests, active sequences,
+cache capacity, and backend limits and will expand decisions to prefill chunks,
+decode steps, and preemptions. Stable request ID breaks all policy ties.
 
 - `FcfsScheduler` orders by `(arrival_time, request_id)`, never bypasses a capacity-blocked head request, and runs admitted work without policy preemption. This intentionally exposes head-of-line blocking as the simple reference policy; requests that can never fit are rejected during validation.
 - `ContinuousBatchingScheduler` revisits the batch after every backend iteration, fills freed slots immediately, mixes configured prefill chunks with one-token decode steps, and may preempt a deterministic victim when KV capacity would otherwise block progress. Its initial victim rule is largest allocated private-block footprint, then newest admission, then request ID.
@@ -92,13 +99,18 @@ The abstraction deliberately separates lookup policy from block storage so later
 
 Synthetic token-count-only requests cannot produce genuine prefix hits. Prefix-cache experiments therefore require explicit token sequences or stable content hashes with collision-check data.
 
-## Deterministic event semantics
+## Future deterministic event semantics
+
+The priority model in this section is a future target. Phase S2 currently uses
+`(timestamp_us, event_sequence)`, drains the entire timestamp, and exposes only
+external cancellation between timestamp boundaries. It does not yet have a
+cancellation `EventType`; see [the Phase S2 simulator](simulator.md).
 
 Simulated time is an integer tick type (`std::int64_t`), with the tick unit stored in run metadata. Floating-point durations are converted once at configuration load using a documented rounding rule. The priority queue key is:
 
 `(timestamp, event_priority, monotonic_event_sequence)`.
 
-At one timestamp, arrivals are registered first, cancellation events are applied second, and backend completions third; then the scheduler runs once against the resulting state. Thus a request may arrive and be cancelled at the same timestamp, cancellation at the exact completion timestamp wins, a late completion for a cancelled request is ignored but audited, and new arrivals cannot retroactively join a completing batch. Event sequence makes repeated events stable. No wall clock, thread scheduling, unordered-container iteration, or random device may affect a simulated run; any stochastic generator uses an explicit seed and stable algorithm identifier.
+In the future target, arrivals are registered first, cancellation events are applied second, and backend completions third; then the scheduler runs once against the resulting state. Thus a request may arrive and be cancelled at the same timestamp, cancellation at the exact completion timestamp wins, a late completion for a cancelled request is ignored but audited, and new arrivals cannot retroactively join a completing batch. Event sequence makes repeated events stable. No wall clock, thread scheduling, unordered-container iteration, or random device may affect a simulated run; any stochastic generator uses an explicit seed and stable algorithm identifier.
 
 The loop jumps directly to the next event timestamp. Backend work is non-preemptible within one submitted iteration; preemption occurs only at iteration boundaries. Every state change emits an append-only event record suitable for replay and invariant checking.
 

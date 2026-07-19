@@ -16,34 +16,49 @@ Implementation follows the repository's C++17, GCC/Ninja/CMake-preset convention
 
 - Add request/event types, integer simulated time, stable event ordering, workload CSV replay, lifecycle validation, and an append-only event log.
 - Add a minimal simulated backend with constant/configured prefill and decode costs.
-- Add FCFS scheduling without preemption or prefix reuse.
+- Add temporary single-active FIFO admission without preemption or prefix reuse.
 - Gate: golden event traces are byte-for-byte repeatable; tests cover simultaneous cancellation/completion/arrival, empty workloads, invalid transitions, and output limits.
 
-### S2 — block KV cache and continuous batching
+### S2 — scheduler abstraction and deterministic FCFS
+
+- Replace temporary FIFO admission with a metadata-only `Scheduler` interface.
+- Add deterministic FCFS ordering by `(arrival_time_us, request_id)`, explicit
+  admission decisions, positive capacity configuration, cancellation, a narrow
+  cancelled-event stale policy, and cumulative scheduler statistics.
+- Validate admission against a monotonic scheduler decision epoch and the
+  current FCFS head. Authorize cancellation staleness by exact outstanding
+  event sequence and type rather than by terminal request state.
+- Keep one active request and preserve the S1 event, arithmetic, backend
+  lifetime, pristine submission, and terminal failure invariants.
+- Gate: tests cover scheduler state validation, FCFS head-of-line behavior,
+  simultaneous arrivals, waiting/active/pre-arrival cancellation, checked
+  statistics, stale-event auditing, and exact simulated timestamps.
+
+### S3 — block KV cache and continuous batching
 
 - Add fixed-size block allocation, partial-tail accounting, deterministic release, capacity invariants, prefill chunking, iteration-level admission, and recompute preemption.
 - Add continuous batching with documented stable tie-breaking.
 - Gate: tests cover exhaustion, fragmentation, finish/cancel cleanup, deterministic victim selection, starvation scenarios, and FCFS-versus-continuous-batching behavioral differences.
 
-### S3 — prefix cache
+### S4 — prefix cache
 
 - Add exact, longest block-aligned prefix lookup; immutable shared blocks; reference counting; compatibility keys; and deterministic LRU eviction.
 - Gate: tests cover full/partial/missed prefixes, incompatible model/tokenizer identities, collision checks, eviction ties, shared-block lifetime, and cache disabled equivalence.
 
-### S4 — metrics and workload experiments
+### S5 — metrics and workload experiments
 
 - Emit request-, token-, batch-, cache-, and run-level records using the definitions in [metrics](metrics.md).
 - Add seeded synthetic workload generation and versioned replay examples under `benchmarks/serving/workloads/`.
 - Compare FCFS and continuous batching across burstiness, prompt/output shape, and KV capacity. Label every result `simulated`.
 - Gate: hand-calculated fixtures validate every metric; conservation checks reconcile arrived requests, terminal requests, token counts, and KV block-time.
 
-### S5 — calibration and sensitivity analysis
+### S6 — calibration and sensitivity analysis
 
 - Fit or select simulated backend parameters from existing or newly collected llama.cpp CPU measurements while preserving source provenance.
 - Report sensitivity bands instead of presenting a single calibration as universal. Keep calibration, analytical estimates, and simulation outputs separately labeled.
 - Gate: held-out workload shapes quantify model error; configuration fingerprints identify the measurement set and fit method.
 
-### S6 — optional llama.cpp backend adapter
+### S7 — optional llama.cpp backend adapter
 
 - Add an opt-in project-owned adapter and capability discovery without modifying or updating the submodule.
 - Start with supported batch/prefill/decode operations and monotonic timing; do not imitate unsupported preemption or prefix operations.
@@ -89,7 +104,7 @@ A result is publishable only when its workload is non-fabricated or explicitly l
 ## Questions to resolve before the relevant phase
 
 1. S1: choose the public trace time unit and whether prompt content is inline token IDs or referenced from a companion file.
-2. S2: choose default block size, token budget, and whether prefill chunks and decode tokens share one budget with equal weight.
-3. S3: choose the prefix key/hash after measuring the memory-versus-collision-check tradeoff.
-4. S5: choose the cost-model family only after inspecting the available llama.cpp measurements; do not assume linear scaling.
-5. S6: decide which pinned llama.cpp APIs are sufficiently stable for an adapter and whether adapter work belongs in the default build.
+2. S3: choose default block size, token budget, and whether prefill chunks and decode tokens share one budget with equal weight.
+3. S4: choose the prefix key/hash after measuring the memory-versus-collision-check tradeoff.
+4. S6: choose the cost-model family only after inspecting the available llama.cpp measurements; do not assume linear scaling.
+5. S7: decide which pinned llama.cpp APIs are sufficiently stable for an adapter and whether adapter work belongs in the default build.
