@@ -10,6 +10,12 @@ Start with the [final technical report](final_report.md) for the complete narrat
 - [Benchmark methodology](benchmarking.md)
 - [CPU profiling environment](profiling_environment.md)
 
+## Serving simulator design
+
+- [Architecture](serving/architecture.md)
+- [Development plan](serving/development_plan.md)
+- [Metric definitions and evidence semantics](serving/metrics.md)
+
 ## Results by phase
 
 - Phase 3: [Q4_K_M CPU baseline](results/cpu_baseline_q4.md)
