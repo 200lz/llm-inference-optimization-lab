@@ -117,7 +117,9 @@ bool same_optional(const std::optional<std::int64_t>& lhs,
 bool same_request(const Request& lhs, const Request& rhs) {
   return lhs.request_id == rhs.request_id &&
          lhs.arrival_time_us == rhs.arrival_time_us &&
-         lhs.prompt_token_count == rhs.prompt_token_count &&
+         lhs.prompt_length() == rhs.prompt_length() &&
+         lhs.has_exact_prompt_tokens() == rhs.has_exact_prompt_tokens() &&
+         (!lhs.has_exact_prompt_tokens() || lhs.prompt_tokens() == rhs.prompt_tokens()) &&
          lhs.max_new_tokens == rhs.max_new_tokens &&
          lhs.generated_token_count == rhs.generated_token_count &&
          lhs.state == rhs.state &&
@@ -153,7 +155,20 @@ bool same_statistics(const ContinuousBatchingStatistics& lhs,
          lhs.internal_fragmentation_tokens ==
              rhs.internal_fragmentation_tokens &&
          lhs.kv_allocation_failure_count == rhs.kv_allocation_failure_count &&
-         lhs.kv_capacity_deferral_count == rhs.kv_capacity_deferral_count;
+         lhs.kv_capacity_deferral_count == rhs.kv_capacity_deferral_count &&
+         lhs.total_original_prompt_tokens == rhs.total_original_prompt_tokens &&
+         lhs.total_matched_prefix_tokens == rhs.total_matched_prefix_tokens &&
+         lhs.saved_simulated_prefill_tokens == rhs.saved_simulated_prefill_tokens &&
+         lhs.cache_lookup_count == rhs.cache_lookup_count &&
+         lhs.cache_hit_lookup_count == rhs.cache_hit_lookup_count &&
+         lhs.cache_miss_lookup_count == rhs.cache_miss_lookup_count &&
+         lhs.cache_matched_block_count == rhs.cache_matched_block_count &&
+         lhs.total_cache_eligible_prompt_tokens_looked_up ==
+             rhs.total_cache_eligible_prompt_tokens_looked_up &&
+         lhs.collision_verification_count == rhs.collision_verification_count &&
+         lhs.prefix_cache_eviction_count == rhs.prefix_cache_eviction_count &&
+         lhs.cached_kv_blocks == rhs.cached_kv_blocks &&
+         lhs.referenced_shared_kv_blocks == rhs.referenced_shared_kv_blocks;
 }
 
 bool same_plan(const BatchPlan& lhs, const BatchPlan& rhs) {
@@ -163,8 +178,37 @@ bool same_plan(const BatchPlan& lhs, const BatchPlan& rhs) {
       lhs.total_prefill_tokens() != rhs.total_prefill_tokens() ||
       lhs.total_decode_tokens() != rhs.total_decode_tokens() ||
       lhs.total_scheduled_tokens() != rhs.total_scheduled_tokens() ||
+      lhs.prefill_work().size() != rhs.prefill_work().size() ||
+      lhs.decode_work().size() != rhs.decode_work().size() ||
+      lhs.work_order().size() != rhs.work_order().size() ||
+      lhs.planned_eviction_ids() != rhs.planned_eviction_ids() ||
+      lhs.planned_allocation_ids() != rhs.planned_allocation_ids() ||
       lhs.deferred_requests().size() != rhs.deferred_requests().size()) {
     return false;
+  }
+  for (std::size_t index = 0; index < lhs.prefill_work().size(); ++index) {
+    const auto& a = lhs.prefill_work()[index];
+    const auto& b = rhs.prefill_work()[index];
+    if (a.request_id != b.request_id ||
+        a.prompt_token_count != b.prompt_token_count ||
+        a.original_prompt_token_count != b.original_prompt_token_count ||
+        a.matched_prefix_token_count != b.matched_prefix_token_count ||
+        a.matched_physical_block_ids != b.matched_physical_block_ids ||
+        a.newly_allocated_block_ids != b.newly_allocated_block_ids ||
+        a.evicted_block_ids != b.evicted_block_ids ||
+        a.prefix_lookup_kind != b.prefix_lookup_kind) return false;
+  }
+  for (std::size_t index = 0; index < lhs.decode_work().size(); ++index) {
+    const auto& a = lhs.decode_work()[index];
+    const auto& b = rhs.decode_work()[index];
+    if (a.request_id != b.request_id ||
+        a.newly_allocated_block_id != b.newly_allocated_block_id ||
+        a.evicted_block_ids != b.evicted_block_ids) return false;
+  }
+  for (std::size_t index = 0; index < lhs.work_order().size(); ++index) {
+    if (lhs.work_order()[index].request_id != rhs.work_order()[index].request_id ||
+        lhs.work_order()[index].is_prefill != rhs.work_order()[index].is_prefill)
+      return false;
   }
   for (std::size_t index = 0; index < lhs.deferred_requests().size(); ++index) {
     if (lhs.deferred_requests()[index].request_id !=
@@ -1294,8 +1338,8 @@ void test_simulated_throughput_comparison() {
     const Request& single_request = single.request(id);
     const Request& continuous_request = continuous.request(id);
     require(single_request.arrival_time_us == continuous_request.arrival_time_us &&
-                single_request.prompt_token_count ==
-                    continuous_request.prompt_token_count &&
+                single_request.prompt_length() ==
+                    continuous_request.prompt_length() &&
                 single_request.max_new_tokens ==
                     continuous_request.max_new_tokens &&
                 single_request.state == RequestState::Finished &&
@@ -1306,6 +1350,132 @@ void test_simulated_throughput_comparison() {
   }
   require(single_tokens == 4 && continuous_tokens == 4,
           "comparison generated different modeled work");
+}
+
+void test_disabled_exact_count_s4_equivalence() {
+  const SimulatedBackend backend = batch_backend();
+  const auto config = ContinuousBatchingConfig(
+      2, 4, SchedulingPolicy::DecodeFirst, KVCacheConfig(8, 2),
+      PrefixCacheConfig(false));
+  for (std::uint64_t length : {UINT64_C(0), UINT64_C(4)}) {
+    ContinuousBatchingEngine count_engine(backend, config);
+    ContinuousBatchingEngine exact_engine(backend, config);
+    count_engine.submit_request(Request::count_only({1}, 0, length, 2));
+    exact_engine.submit_request(Request::exact_tokens(
+        {1}, 0, std::vector<std::int32_t>(static_cast<std::size_t>(length), 7), 2));
+    require(count_engine.run() == RunResult::Completed &&
+                exact_engine.run() == RunResult::Completed,
+            "disabled exact/count workloads did not complete");
+    const Request& count = count_engine.request({1});
+    const Request& exact = exact_engine.request({1});
+    require(count.request_id == exact.request_id &&
+                count.arrival_time_us == exact.arrival_time_us &&
+                count.prompt_length() == exact.prompt_length() &&
+                count.max_new_tokens == exact.max_new_tokens &&
+                count.generated_token_count == exact.generated_token_count &&
+                count.state == exact.state &&
+                same_optional(count.admitted_time_us, exact.admitted_time_us) &&
+                same_optional(count.first_scheduled_time_us,
+                              exact.first_scheduled_time_us) &&
+                same_optional(count.first_token_time_us,
+                              exact.first_token_time_us) &&
+                same_optional(count.finish_time_us, exact.finish_time_us),
+            "disabled exact/count request lifecycle differs");
+    require(same_trace(count_engine.plan_trace(), exact_engine.plan_trace()),
+            "disabled exact/count traces differ");
+    require(same_statistics(count_engine.statistics(), exact_engine.statistics()),
+            "disabled exact/count statistics differ");
+    require(count_engine.kv_cache().physical_blocks() ==
+                exact_engine.kv_cache().physical_blocks() &&
+                count_engine.kv_cache().free_block_ids() ==
+                    exact_engine.kv_cache().free_block_ids() &&
+                count_engine.kv_cache().block_tables() ==
+                    exact_engine.kv_cache().block_tables() &&
+                count_engine.kv_cache().access_epoch() ==
+                    exact_engine.kv_cache().access_epoch(),
+            "disabled exact/count KV snapshots differ");
+    require(exact_engine.statistics().cache_lookup_count == 0 &&
+                exact_engine.statistics().prefix_cache_eviction_count == 0 &&
+                exact_engine.statistics().cached_kv_blocks == 0 &&
+                exact_engine.statistics().referenced_shared_kv_blocks == 0,
+            "disabled exact request changed prefix-cache state or metrics");
+  }
+
+  ContinuousBatchingEngine count_oversized(backend, config);
+  ContinuousBatchingEngine exact_oversized(backend, config);
+  require_throws<std::invalid_argument>(
+      [&] { count_oversized.submit_request(
+          Request::count_only({2}, 0, 5, 1)); },
+      "disabled oversized count-only prompt was accepted");
+  require_throws<std::invalid_argument>(
+      [&] { exact_oversized.submit_request(Request::exact_tokens(
+          {2}, 0, std::vector<std::int32_t>(5, 7), 1)); },
+      "disabled oversized exact prompt was accepted");
+  require(ContinuousBatchingEngineTestAccess::raw_requests(count_oversized).empty() &&
+              ContinuousBatchingEngineTestAccess::raw_requests(exact_oversized).empty(),
+          "synchronous oversized rejection changed engine state");
+}
+
+void test_enabled_oversized_requires_committed_hit() {
+  const SimulatedBackend backend = batch_backend();
+  const PrefixCacheConfig cache(true, "salt", "model");
+  const auto config = ContinuousBatchingConfig(
+      2, 2, SchedulingPolicy::DecodeFirst, KVCacheConfig(4, 2), cache);
+  ContinuousBatchingEngine hit_engine(backend, config);
+  hit_engine.submit_request(Request::exact_tokens({1}, 0, {1, 2}, 0));
+  require(hit_engine.run() == RunResult::Completed,
+          "cache seed did not complete");
+  hit_engine.submit_request(Request::exact_tokens(
+      {2}, hit_engine.clock().now_us(), {1, 2, 3, 4}, 0));
+  require(hit_engine.run() == RunResult::Completed,
+          "oversized prompt with bounded unmatched suffix did not complete");
+  const PrefillWork& hit = hit_engine.plan_trace().back().plan.prefill_work().front();
+  require(hit.original_prompt_token_count == 4 &&
+              hit.matched_prefix_token_count == 2 &&
+              hit.prompt_token_count == 2,
+          "oversized committed hit scheduled the wrong unmatched work");
+
+  ContinuousBatchingEngine miss_engine(backend, config);
+  miss_engine.submit_request(Request::exact_tokens({3}, 0, {9, 8, 7}, 1));
+  require_throws<std::invalid_argument>(
+      [&] { (void)miss_engine.run_next_iteration(); },
+      "oversized unmatched prefill was not rejected deterministically");
+  require(miss_engine.failed() &&
+              ContinuousBatchingEngineTestAccess::raw_trace(miss_engine).empty(),
+          "oversized unmatched prefill was represented as a stall or trace");
+}
+
+void test_cache_aware_complete_determinism() {
+  const SimulatedBackend backend = batch_backend();
+  const auto config = ContinuousBatchingConfig(
+      2, 4, SchedulingPolicy::FcfsMixed, KVCacheConfig(4, 2),
+      PrefixCacheConfig(true, "salt", "model"));
+  ContinuousBatchingEngine lhs(backend, config);
+  ContinuousBatchingEngine rhs(backend, config);
+  for (ContinuousBatchingEngine* engine : {&lhs, &rhs}) {
+    engine->submit_request(Request::exact_tokens({1}, 0, {1, 2, 3, 4}, 0));
+    require(engine->run() == RunResult::Completed,
+            "deterministic cache seed failed");
+    const auto now = engine->clock().now_us();
+    engine->submit_request(Request::exact_tokens({2}, now, {1, 2, 8}, 2));
+    engine->submit_request(Request::exact_tokens({3}, now, {9}, 1));
+    require(engine->run() == RunResult::Completed,
+            "deterministic cache workload failed");
+  }
+  require(lhs.requests().size() == rhs.requests().size(),
+          "cache-aware deterministic request counts differ");
+  for (const auto& entry : lhs.requests())
+    require(same_request(entry.second, rhs.request(entry.first)),
+            "cache-aware deterministic request records differ");
+  require(same_trace(lhs.plan_trace(), rhs.plan_trace()),
+          "cache-aware complete traces differ");
+  require(same_statistics(lhs.statistics(), rhs.statistics()),
+          "cache-aware complete statistics differ");
+  require(lhs.kv_cache().physical_blocks() == rhs.kv_cache().physical_blocks() &&
+              lhs.kv_cache().free_block_ids() == rhs.kv_cache().free_block_ids() &&
+              lhs.kv_cache().block_tables() == rhs.kv_cache().block_tables() &&
+              lhs.kv_cache().access_epoch() == rhs.kv_cache().access_epoch(),
+          "cache-aware deterministic KV snapshots differ");
 }
 
 }  // namespace
@@ -1343,6 +1513,12 @@ int main() {
        test_kv_planner_reservation_and_decode_deferral},
       {"KV cancellation and zero-output release",
        test_kv_cancellation_and_zero_output_release},
+      {"disabled exact/count S4 equivalence",
+       test_disabled_exact_count_s4_equivalence},
+      {"enabled oversized committed-hit policy",
+       test_enabled_oversized_requires_committed_hit},
+      {"cache-aware complete determinism",
+       test_cache_aware_complete_determinism},
       {"SIMULATED educational cost-model comparison",
        test_simulated_throughput_comparison},
   };

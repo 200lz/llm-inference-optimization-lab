@@ -77,9 +77,11 @@ The planner uses this precedence for every candidate:
 3. `KVCapacity` when iteration budgets fit but resident block capacity does
    not.
 
-Planning never mutates the manager. It starts with the current free-block count
-and subtracts locally reserved prompt blocks and decode-boundary blocks, so
-multiple candidates cannot reserve the same physical capacity. Requests
+Planning never mutates the manager. It applies exact prompt, decode-boundary,
+and cached-victim reservations to a local manager copy in candidate order, so
+multiple candidates cannot reserve the same physical capacity. Token- or
+sequence-deferred candidates acquire no references, protect no matches, and
+commit no prefix metrics. Requests
 finishing in the plan do not donate their blocks to another candidate in that
 same plan. Completed and cancelled work is released before the next plan.
 There is no preemption: capacity-blocked work remains in its lifecycle state
@@ -115,23 +117,52 @@ become unavailable.
 The instantaneous metrics are:
 
 ```text
-represented_tokens = sum(valid_token_count of in-use blocks)
+represented_tokens = sum(valid_token_count of every resident non-Free block)
 internal_fragmentation_tokens =
     allocated_block_count * block_size_tokens - represented_tokens
 block_utilization = allocated_block_count / total_num_blocks
 peak_block_utilization = peak_allocated_block_count / total_num_blocks
 ```
 
+Under S5, resident blocks include both `InUse` and `Cached` blocks. A shared
+physical block contributes its valid tokens once regardless of reference count,
+and a zero-reference `Cached` block remains physically represented until
+eviction. Logical reused-token and saved-prefill accounting is reported
+separately.
+
 Fragmentation is unused modeled token capacity, not actual KV bytes. Integer
 capacity, represented-token, peak-count, failure-count, and deferral-count
 accounting is checked. A correctly reserved plan normally has zero attempted
 allocation failures.
 
-## Limitations and S5 handoff
+Direct manager prompt allocation, prefix-suffix allocation, and decode-boundary
+growth report valid physical exhaustion as `KVCapacityError`. Each increments
+`allocation_failure_count` exactly once. Planner `KVCapacity` deferral remains
+normal control flow and does not throw or increment that counter.
 
-S4 has no real tensor storage, byte-level memory sizing, prefix sharing,
-reference counts above one, cached-block state, eviction, swapping, preemption,
-threads, networking, llama.cpp integration, model execution, or actual
-hardware performance measurement. S5 can add immutable shared, block-aligned
-prefix entries and reference-counted lifetime without changing S4's private
-allocation invariants silently.
+The prepared plan records exact matched, allocated, and evicted IDs per work
+item plus plan-wide allocation and eviction lists. Commit replays these IDs in
+policy order and requires equality with deterministic physical results; it
+does not select victims again. Decode-triggered evictions are included.
+
+## S5 extension
+
+S5 retains this private path when caching is disabled or a request has only a
+prompt count. With exact token IDs and caching enabled, blocks additionally use
+`Cached`, exact prefix-key metadata, multi-request reference counts, and
+deterministic LRU eviction. Cached occupancy remains physical even at zero
+references; logical reuse is reported separately. Full details and the revised
+invariants are in [Phase S5 prefix caching](prefix_cache.md).
+
+Prompt length now comes only from `Request::prompt_length()`: exact-token
+length is derived from the private immutable vector, while count-only requests
+store only a count. `KVCacheManager` snapshots that representation into
+request-level prompt provenance at allocation. Blocks explicitly record full
+shared prompt, full computed prompt, private prompt tail, private count-only
+prompt, or private decode provenance. Count-only blocks, partial tails, and
+decode blocks cannot enter the prefix index. Completed-prefix publication takes
+only a request ID and uses the stored exact tokens and recorded prompt boundary.
+
+Neither phase stores real tensors or bytes, shares partial/decode blocks,
+preempts, swaps, runs threads, integrates llama.cpp, executes a model, or
+reports actual hardware performance.

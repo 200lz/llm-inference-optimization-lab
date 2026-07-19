@@ -261,7 +261,7 @@ void SimulationEngine::start_next_if_idle() {
   }
 
   const std::int64_t prefill_cost =
-      backend_.estimate_prefill_us(next.prompt_token_count, 1);
+      backend_.estimate_prefill_us(next.prompt_length(), 1);
   schedule_after(prefill_cost, id, EventType::PrefillComplete);
 
   scheduler_->notify_admitted(decision, clock_.now_us());

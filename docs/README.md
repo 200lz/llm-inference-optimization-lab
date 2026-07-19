@@ -19,6 +19,8 @@ Start with the [final technical report](final_report.md) for the complete narrat
 - [Phase S2 scheduler and FCFS policy](serving/scheduler.md)
 - [Phase S3 deterministic continuous batching](serving/continuous_batching.md)
 - [Phase S4 deterministic block KV-cache metadata](serving/kv_cache.md)
+- [Phase S5 deterministic prefix cache](serving/prefix_cache.md)
+- [Prefix-cache comparison with vLLM and SGLang concepts](serving/prefix_cache_comparison.md)
 
 ## Results by phase
 

@@ -126,6 +126,18 @@ A result is publishable only when its workload is non-fabricated or explicitly l
 1. S1: choose the public trace time unit and whether prompt content is inline token IDs or referenced from a companion file.
 2. S4: resolved with a 16-token API default and explicit test values;
    preemption is deferred beyond S4.
-3. S5: choose the prefix key/hash after measuring the memory-versus-collision-check tradeoff.
+3. S5: implemented deterministic full-block prefix caching with a documented
+   FNV-1a encoding and mandatory exact collision verification. Production
+   hash/security tradeoffs remain outside this simulator.
 4. S7: choose the cost-model family only after inspecting the available llama.cpp measurements; do not assume linear scaling.
 5. S8: decide which pinned llama.cpp APIs are sufficiently stable for an adapter and whether adapter work belongs in the default build.
+
+## Phase S5 completion
+
+S5 extends the S4 metadata pool with exact-token requests, parent-dependent
+keys, longest consecutive prefix lookup, shared references, cached
+zero-reference blocks, deterministic LRU eviction, cache-aware prefill budgets,
+two-phase engine integration, diagnostics, native tests, and a SIMULATED smoke
+scenario. Same-plan insertions become visible only at the next iteration.
+Real tensors, partial-block/decode sharing, radix trees, chunked prefill,
+preemption, swapping, distribution, and hardware execution remain deferred.
