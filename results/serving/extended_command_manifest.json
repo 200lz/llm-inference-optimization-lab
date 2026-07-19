@@ -1,0 +1,102 @@
+{
+  "evidence_type": "SIMULATED",
+  "matrix": "configs/serving/matrix_extended.json",
+  "runs": [
+    {
+      "config": "configs/serving/fcfs_chat_small.json",
+      "result": "results/serving/raw/fcfs_chat_small.jsonl"
+    },
+    {
+      "config": "configs/serving/continuous_chat_small.json",
+      "result": "results/serving/raw/continuous_chat_small.jsonl"
+    },
+    {
+      "config": "configs/serving/fcfs_chat_continuous.json",
+      "result": "results/serving/raw/fcfs_chat_continuous.jsonl"
+    },
+    {
+      "config": "configs/serving/shared_prefix_cache_off.json",
+      "result": "results/serving/raw/shared_prefix_cache_off.jsonl"
+    },
+    {
+      "config": "configs/serving/shared_prefix_cache_on.json",
+      "result": "results/serving/raw/shared_prefix_cache_on.jsonl"
+    },
+    {
+      "config": "configs/serving/coding_agent_prefix_on.json",
+      "result": "results/serving/raw/coding_agent_prefix_on.jsonl"
+    },
+    {
+      "config": "configs/serving/coding_agent_prefix_off.json",
+      "result": "results/serving/raw/coding_agent_prefix_off.jsonl"
+    },
+    {
+      "config": "configs/serving/mixed_prefix_cache_off.json",
+      "result": "results/serving/raw/mixed_prefix_cache_off.jsonl"
+    },
+    {
+      "config": "configs/serving/mixed_prefix_cache_on.json",
+      "result": "results/serving/raw/mixed_prefix_cache_on.jsonl"
+    },
+    {
+      "config": "configs/serving/kv_small.json",
+      "result": "results/serving/raw/kv_small.jsonl"
+    },
+    {
+      "config": "configs/serving/kv_medium.json",
+      "result": "results/serving/raw/kv_medium.jsonl"
+    },
+    {
+      "config": "configs/serving/kv_large.json",
+      "result": "results/serving/raw/kv_large.jsonl"
+    },
+    {
+      "config": "configs/serving/block_size_8.json",
+      "result": "results/serving/raw/block_size_8.jsonl"
+    },
+    {
+      "config": "configs/serving/block_size_16.json",
+      "result": "results/serving/raw/block_size_16.jsonl"
+    },
+    {
+      "config": "configs/serving/block_size_32.json",
+      "result": "results/serving/raw/block_size_32.jsonl"
+    },
+    {
+      "config": "configs/serving/mixed_low_load.json",
+      "result": "results/serving/raw/mixed_low_load.jsonl"
+    },
+    {
+      "config": "configs/serving/mixed_medium_load.json",
+      "result": "results/serving/raw/mixed_medium_load.jsonl"
+    },
+    {
+      "config": "configs/serving/mixed_overload.json",
+      "result": "results/serving/raw/mixed_overload.jsonl"
+    },
+    {
+      "config": "configs/serving/decode_first.json",
+      "result": "results/serving/raw/decode_first.jsonl"
+    },
+    {
+      "config": "configs/serving/fcfs_mixed.json",
+      "result": "results/serving/raw/fcfs_mixed.jsonl"
+    },
+    {
+      "config": "configs/serving/single_active_fcfs_mixed.json",
+      "result": "results/serving/raw/single_active_fcfs_mixed.jsonl"
+    },
+    {
+      "config": "configs/serving/fcfs_overload.json",
+      "result": "results/serving/raw/fcfs_overload.jsonl"
+    },
+    {
+      "config": "configs/serving/mixed_overload_fcfs_mixed.json",
+      "result": "results/serving/raw/mixed_overload_fcfs_mixed.jsonl"
+    },
+    {
+      "config": "configs/serving/overload_decode_first.json",
+      "result": "results/serving/raw/overload_decode_first.jsonl"
+    }
+  ]
+}
