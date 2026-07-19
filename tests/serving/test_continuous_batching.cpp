@@ -238,6 +238,9 @@ bool same_trace(const std::vector<BatchTraceEntry>& lhs,
             rhs[index].represented_kv_tokens ||
         lhs[index].internal_fragmentation_tokens !=
             rhs[index].internal_fragmentation_tokens ||
+        lhs[index].cached_kv_blocks != rhs[index].cached_kv_blocks ||
+        lhs[index].referenced_shared_kv_blocks !=
+            rhs[index].referenced_shared_kv_blocks ||
         lhs[index].kv_block_utilization !=
             rhs[index].kv_block_utilization ||
         lhs[index].kv_block_tables != rhs[index].kv_block_tables) {
@@ -245,6 +248,25 @@ bool same_trace(const std::vector<BatchTraceEntry>& lhs,
     }
   }
   return true;
+}
+
+void test_trace_equality_includes_cache_gauges() {
+  const SimulatedBackend backend = batch_backend();
+  ContinuousBatchingEngine engine(
+      backend, ContinuousBatchingConfig(
+          1, 4, SchedulingPolicy::DecodeFirst, KVCacheConfig(4, 2),
+          PrefixCacheConfig(true, "salt", "model")));
+  engine.submit_request(Request::exact_tokens({1}, 0, {1, 2}, 0));
+  require(engine.run() == RunResult::Completed && !engine.plan_trace().empty(),
+          "cache-gauge trace fixture did not complete");
+  auto changed = engine.plan_trace();
+  ++changed.front().cached_kv_blocks;
+  require(!same_trace(engine.plan_trace(), changed),
+          "trace equality ignored cached_kv_blocks");
+  changed = engine.plan_trace();
+  ++changed.front().referenced_shared_kv_blocks;
+  require(!same_trace(engine.plan_trace(), changed),
+          "trace equality ignored referenced_shared_kv_blocks");
 }
 
 struct EngineSnapshot {
@@ -1519,6 +1541,7 @@ int main() {
        test_enabled_oversized_requires_committed_hit},
       {"cache-aware complete determinism",
        test_cache_aware_complete_determinism},
+      {"trace equality cache gauges", test_trace_equality_includes_cache_gauges},
       {"SIMULATED educational cost-model comparison",
        test_simulated_throughput_comparison},
   };

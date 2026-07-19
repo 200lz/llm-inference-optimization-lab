@@ -1,0 +1,8 @@
+{"arrival_time_us":0,"max_new_tokens":55,"prompt_token_count":32,"request_id":"chat-0000","schema_version":"serving-workload-v1","workload_class":"chat"}
+{"arrival_time_us":37401,"max_new_tokens":64,"prompt_token_count":39,"request_id":"chat-0001","schema_version":"serving-workload-v1","workload_class":"chat"}
+{"arrival_time_us":47050,"max_new_tokens":31,"prompt_token_count":23,"request_id":"chat-0002","schema_version":"serving-workload-v1","workload_class":"chat"}
+{"arrival_time_us":83375,"max_new_tokens":40,"prompt_token_count":69,"request_id":"chat-0003","schema_version":"serving-workload-v1","workload_class":"chat"}
+{"arrival_time_us":85587,"max_new_tokens":16,"prompt_token_count":33,"request_id":"chat-0004","schema_version":"serving-workload-v1","workload_class":"chat"}
+{"arrival_time_us":101417,"max_new_tokens":24,"prompt_token_count":30,"request_id":"chat-0005","schema_version":"serving-workload-v1","workload_class":"chat"}
+{"arrival_time_us":106816,"max_new_tokens":41,"prompt_token_count":26,"request_id":"chat-0006","schema_version":"serving-workload-v1","workload_class":"chat"}
+{"arrival_time_us":113324,"max_new_tokens":44,"prompt_token_count":41,"request_id":"chat-0007","schema_version":"serving-workload-v1","workload_class":"chat"}

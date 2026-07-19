@@ -1,0 +1,1 @@
+{"schema_version":"serving-workload-v1","workload_class":"chat","request_count":8,"seed":20260719,"arrival":{"mode":"exponential","mean_interval_us":12000,"start_time_us":0}}

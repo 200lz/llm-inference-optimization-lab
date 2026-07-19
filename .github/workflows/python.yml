@@ -17,3 +17,5 @@ jobs:
         run: python -m pip install -r requirements.txt
       - name: Test
         run: python -m pytest
+      - name: S6 workload and metric validation
+        run: python -m pytest tests/python/test_serving_workloads.py tests/python/test_serving_metrics.py tests/python/test_serving_documentation.py

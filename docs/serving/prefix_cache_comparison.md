@@ -50,3 +50,6 @@ kernels, PagedAttention, RadixAttention, real tensor storage, distributed
 cache, distributed serving, preemption, swapping, or production security
 claim. The comparison is architectural and educational.
 
+The broader [serving-engine comparison](engine_comparison.md) also places this
+project beside llama.cpp and summarizes scheduler, batching, KV allocation,
+APIs, distributed support, and hardware assumptions without a parity claim.

@@ -41,6 +41,47 @@ The workflow separates observation, hypothesis, and verified conclusion so that 
 
 See the [final technical report](docs/final_report.md) for interpretation and links to the complete result tables.
 
+## Mini LLM Serving Engine
+
+**Evidence: SIMULATED.** The repository also contains a deterministic C++17 serving-engine simulator with a dependency-free native core and Python workload/analysis tools:
+
+```text
+JSONL workload -> validation/TSV -> FCFS or continuous batching
+  -> block KV + exact prefix cache -> request/iteration records
+  -> TTFT / P95 / P99 / throughput / goodput analysis
+```
+
+Implemented features include deterministic request replay, single-active FCFS, continuous `DecodeFirst` and `FcfsMixed` scheduling, sequence/token budgets, block KV capacity, exact-token full-block prefix reuse, collision verification, reference counts, deterministic LRU, and workload-driven service metrics. Representative synthetic results illustrate the evidence boundary:
+
+| Configuration | Evidence | Completed | Request/s | P99 TTFT (us) | Prefix token hit rate |
+| --- | --- | ---: | ---: | ---: | ---: |
+| FCFS chat | SIMULATED | 8 | 68.94 | 946 | N/A |
+| Continuous chat | SIMULATED | 8 | 67.97 | 521 | N/A |
+| Shared-prefix cache on | SIMULATED | 8 | 110.69 | 536 | 0.88 |
+| Eight-block KV pool | SIMULATED | 1/12 | 605.69* | 256 among completed | N/A |
+
+`*` The rate uses the one completed request's full-drain window; the run then
+stalled with 11 unfinished requests, so it is not a successful-capacity result.
+
+Quick start:
+
+```bash
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+cmake --preset debug
+cmake --build --preset debug -j
+scripts/run_serving_demo.sh
+# Full validation, still without models or network access:
+scripts/verify_serving_project.sh
+```
+
+Portable serving provenance records repository files relative to the repository root,
+uses symbolic temporary paths, and hashes the exact configuration, workload, and
+native runner. Normal runs write below ignored `.artifacts/serving/`; updating the
+checked-in SIMULATED reference requires explicit `--update-reference`.
+
+Read the [serving final report](docs/serving/final_report.md), [architecture](docs/serving/architecture.md), and [interview notes](docs/serving/interview_notes.md). The simulator has no tensors, tokenizer, real accelerator execution, networking, preemption, swapping, chunked prefill, or performance parity claim. It complements the earlier real llama.cpp CPU profiling work: that work measures kernels and binaries; this layer studies deterministic serving-policy interactions.
+
 ## Main engineering conclusions
 
 - Smaller GGUF files did not automatically produce higher CPU throughput.
@@ -146,6 +187,7 @@ Use [the Release build guide](docs/llama_cpp_build.md) before verification and [
 - virtualized and incomplete `perf` event support under WSL2
 - mmap, page-cache, shared-page, and RSS accounting limitations
 - local optimization did not demonstrate a stable end-to-end gain
+- serving-engine results use synthetic costs and require target-hardware validation
 
 ## Future work
 

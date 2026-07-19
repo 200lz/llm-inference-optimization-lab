@@ -228,6 +228,8 @@ struct BatchTraceEntry {
   std::uint64_t represented_kv_tokens;
   std::uint64_t internal_fragmentation_tokens;
   double kv_block_utilization;
+  std::size_t cached_kv_blocks;
+  std::size_t referenced_shared_kv_blocks;
   std::map<RequestId, std::vector<std::size_t>> kv_block_tables;
 };
 

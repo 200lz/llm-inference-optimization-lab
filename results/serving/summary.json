@@ -1,0 +1,554 @@
+[
+  {
+    "config_name": "fcfs_chat_small",
+    "evidence_type": "SIMULATED",
+    "result_path": "results/serving/raw/fcfs_chat_small.jsonl",
+    "summary": {
+      "arrival_rate_per_s": 61.76979280646642,
+      "average_batch_size": 1,
+      "average_queue_depth": 0.00452410702744625,
+      "completed": 8,
+      "completion_ratio": 1.0,
+      "duration_us": 116045,
+      "e2e_latency_us": {
+        "p50": 2445,
+        "p90": 3745,
+        "p95": 3745,
+        "p99": 3745
+      },
+      "eviction_count": 0,
+      "evidence_type": "SIMULATED",
+      "good_requests": 8,
+      "good_requests_per_s": 68.9387737515619,
+      "goodput_ratio": 1.0,
+      "internal_fragmentation_tokens": null,
+      "iteration_count": 0,
+      "itl_available": true,
+      "kv_capacity_deferrals": 0,
+      "kv_peak_utilization": null,
+      "matched_prefix_tokens": 0,
+      "maximum_batch_size": 1,
+      "maximum_queue_depth": 1,
+      "output_token_throughput_per_s": 2714.46421646775,
+      "peak_allocated_blocks": null,
+      "prefix_lookup_hit_rate": null,
+      "prefix_token_hit_rate": null,
+      "queue_delay_us": {
+        "p50": 0,
+        "p90": 525,
+        "p95": 525,
+        "p99": 525
+      },
+      "request_count": 8,
+      "request_throughput_per_s": 68.9387737515619,
+      "run_status": "completed",
+      "saved_simulated_prefill_tokens": 0,
+      "scheduled_prefill_tokens": 293,
+      "schema_version": "serving-summary-v1",
+      "slo_violations": {
+        "e2e": 0,
+        "tpot": 0,
+        "ttft": 0
+      },
+      "stalled_iterations": 0,
+      "submitted": 8,
+      "total_token_throughput_per_s": 5239.346805118704,
+      "tpot_us": {
+        "p50": 52.0,
+        "p90": 52.0,
+        "p95": 52.0,
+        "p99": 52.0
+      },
+      "ttft_us": {
+        "p50": 413,
+        "p90": 946,
+        "p95": 946,
+        "p99": 946
+      },
+      "unfinished": 0
+    }
+  },
+  {
+    "config_name": "continuous_chat_small",
+    "evidence_type": "SIMULATED",
+    "result_path": "results/serving/raw/continuous_chat_small.jsonl",
+    "summary": {
+      "arrival_rate_per_s": 61.76979280646642,
+      "average_batch_size": 1.0555555555555556,
+      "average_queue_depth": 0.000645687487256168,
+      "completed": 8,
+      "completion_ratio": 1.0,
+      "duration_us": 117704,
+      "e2e_latency_us": {
+        "p50": 4026,
+        "p90": 6230,
+        "p95": 6230,
+        "p99": 6230
+      },
+      "eviction_count": 0,
+      "evidence_type": "SIMULATED",
+      "good_requests": 8,
+      "good_requests_per_s": 67.96710392170189,
+      "goodput_ratio": 1.0,
+      "internal_fragmentation_tokens": 0,
+      "iteration_count": 312,
+      "itl_available": true,
+      "kv_capacity_deferrals": 0,
+      "kv_peak_utilization": 0.0859375,
+      "matched_prefix_tokens": 0,
+      "maximum_batch_size": 2,
+      "maximum_queue_depth": 1,
+      "output_token_throughput_per_s": 2676.2047169170123,
+      "peak_allocated_blocks": 11,
+      "prefix_lookup_hit_rate": null,
+      "prefix_token_hit_rate": null,
+      "queue_delay_us": {
+        "p50": 0,
+        "p90": 76,
+        "p95": 76,
+        "p99": 76
+      },
+      "request_count": 8,
+      "request_throughput_per_s": 67.96710392170189,
+      "run_status": "completed",
+      "saved_simulated_prefill_tokens": 0,
+      "scheduled_prefill_tokens": 293,
+      "schema_version": "serving-summary-v1",
+      "slo_violations": {
+        "e2e": 0,
+        "tpot": 0,
+        "ttft": 0
+      },
+      "stalled_iterations": 0,
+      "submitted": 8,
+      "total_token_throughput_per_s": 5165.499898049344,
+      "tpot_us": {
+        "p50": 93.0,
+        "p90": 106.0,
+        "p95": 106.0,
+        "p99": 106.0
+      },
+      "ttft_us": {
+        "p50": 336,
+        "p90": 521,
+        "p95": 521,
+        "p99": 521
+      },
+      "unfinished": 0
+    }
+  },
+  {
+    "config_name": "shared_prefix_cache_off",
+    "evidence_type": "SIMULATED",
+    "result_path": "results/serving/raw/shared_prefix_cache_off.jsonl",
+    "summary": {
+      "arrival_rate_per_s": 99.99999999999999,
+      "average_batch_size": 1,
+      "average_queue_depth": 0.0,
+      "completed": 8,
+      "completion_ratio": 1.0,
+      "duration_us": 72592,
+      "e2e_latency_us": {
+        "p50": 2225,
+        "p90": 2592,
+        "p95": 2592,
+        "p99": 2592
+      },
+      "eviction_count": 0,
+      "evidence_type": "SIMULATED",
+      "good_requests": 8,
+      "good_requests_per_s": 110.20498126515318,
+      "goodput_ratio": 1.0,
+      "internal_fragmentation_tokens": 0,
+      "iteration_count": 171,
+      "itl_available": true,
+      "kv_capacity_deferrals": 0,
+      "kv_peak_utilization": 0.0546875,
+      "matched_prefix_tokens": 0,
+      "maximum_batch_size": 1,
+      "maximum_queue_depth": 1,
+      "output_token_throughput_per_s": 2148.997134670487,
+      "peak_allocated_blocks": 7,
+      "prefix_lookup_hit_rate": null,
+      "prefix_token_hit_rate": null,
+      "queue_delay_us": {
+        "p50": 0,
+        "p90": 0,
+        "p95": 0,
+        "p99": 0
+      },
+      "request_count": 8,
+      "request_throughput_per_s": 110.20498126515318,
+      "run_status": "completed",
+      "saved_simulated_prefill_tokens": 0,
+      "scheduled_prefill_tokens": 589,
+      "schema_version": "serving-summary-v1",
+      "slo_violations": {
+        "e2e": 0,
+        "tpot": 0,
+        "ttft": 0
+      },
+      "stalled_iterations": 0,
+      "submitted": 8,
+      "total_token_throughput_per_s": 10262.83888031739,
+      "tpot_us": {
+        "p50": 93.0,
+        "p90": 93.0,
+        "p95": 93.0,
+        "p99": 93.0
+      },
+      "ttft_us": {
+        "p50": 541,
+        "p90": 556,
+        "p95": 556,
+        "p99": 556
+      },
+      "unfinished": 0
+    }
+  },
+  {
+    "config_name": "shared_prefix_cache_on",
+    "evidence_type": "SIMULATED",
+    "result_path": "results/serving/raw/shared_prefix_cache_on.jsonl",
+    "summary": {
+      "arrival_rate_per_s": 99.99999999999999,
+      "average_batch_size": 1,
+      "average_queue_depth": 0.0,
+      "completed": 8,
+      "completion_ratio": 1.0,
+      "duration_us": 72272,
+      "e2e_latency_us": {
+        "p50": 1931,
+        "p90": 2272,
+        "p95": 2272,
+        "p99": 2272
+      },
+      "eviction_count": 0,
+      "evidence_type": "SIMULATED",
+      "good_requests": 8,
+      "good_requests_per_s": 110.69293779056896,
+      "goodput_ratio": 1.0,
+      "internal_fragmentation_tokens": 0,
+      "iteration_count": 171,
+      "itl_available": true,
+      "kv_capacity_deferrals": 0,
+      "kv_peak_utilization": 0.0546875,
+      "matched_prefix_tokens": 448,
+      "maximum_batch_size": 1,
+      "maximum_queue_depth": 1,
+      "output_token_throughput_per_s": 2158.5122869160946,
+      "peak_allocated_blocks": 7,
+      "prefix_lookup_hit_rate": 0.875,
+      "prefix_token_hit_rate": 0.875,
+      "queue_delay_us": {
+        "p50": 0,
+        "p90": 0,
+        "p95": 0,
+        "p99": 0
+      },
+      "request_count": 8,
+      "request_throughput_per_s": 110.69293779056896,
+      "run_status": "completed",
+      "saved_simulated_prefill_tokens": 448,
+      "scheduled_prefill_tokens": 141,
+      "schema_version": "serving-summary-v1",
+      "slo_violations": {
+        "e2e": 0,
+        "tpot": 0,
+        "ttft": 0
+      },
+      "stalled_iterations": 0,
+      "submitted": 8,
+      "total_token_throughput_per_s": 4109.475315474872,
+      "tpot_us": {
+        "p50": 93.0,
+        "p90": 93.0,
+        "p95": 93.0,
+        "p99": 93.0
+      },
+      "ttft_us": {
+        "p50": 226,
+        "p90": 536,
+        "p95": 536,
+        "p99": 536
+      },
+      "unfinished": 0
+    }
+  },
+  {
+    "config_name": "kv_small",
+    "evidence_type": "SIMULATED",
+    "result_path": "results/serving/raw/kv_small.jsonl",
+    "summary": {
+      "arrival_rate_per_s": 100.0,
+      "average_batch_size": 1,
+      "average_queue_depth": 0.0,
+      "completed": 1,
+      "completion_ratio": 0.08333333333333333,
+      "duration_us": 1651,
+      "e2e_latency_us": {
+        "p50": 1651,
+        "p90": 1651,
+        "p95": 1651,
+        "p99": 1651
+      },
+      "eviction_count": 0,
+      "evidence_type": "SIMULATED",
+      "good_requests": 1,
+      "good_requests_per_s": 605.6935190793458,
+      "goodput_ratio": 1.0,
+      "internal_fragmentation_tokens": 0,
+      "iteration_count": 19,
+      "itl_available": true,
+      "kv_capacity_deferrals": 1,
+      "kv_peak_utilization": 0.25,
+      "matched_prefix_tokens": 0,
+      "maximum_batch_size": 1,
+      "maximum_queue_depth": 1,
+      "output_token_throughput_per_s": 9691.096305269533,
+      "peak_allocated_blocks": 2,
+      "prefix_lookup_hit_rate": null,
+      "prefix_token_hit_rate": null,
+      "queue_delay_us": {
+        "p50": 0,
+        "p90": 0,
+        "p95": 0,
+        "p99": 0
+      },
+      "request_count": 12,
+      "request_throughput_per_s": 605.6935190793458,
+      "run_status": "stalled",
+      "saved_simulated_prefill_tokens": 0,
+      "scheduled_prefill_tokens": 16,
+      "schema_version": "serving-summary-v1",
+      "slo_violations": {
+        "e2e": 0,
+        "tpot": 0,
+        "ttft": 0
+      },
+      "stalled_iterations": 1,
+      "submitted": 12,
+      "total_token_throughput_per_s": 19382.192610539067,
+      "tpot_us": {
+        "p50": 93.0,
+        "p90": 93.0,
+        "p95": 93.0,
+        "p99": 93.0
+      },
+      "ttft_us": {
+        "p50": 256,
+        "p90": 256,
+        "p95": 256,
+        "p99": 256
+      },
+      "unfinished": 11
+    }
+  },
+  {
+    "config_name": "kv_large",
+    "evidence_type": "SIMULATED",
+    "result_path": "results/serving/raw/kv_large.jsonl",
+    "summary": {
+      "arrival_rate_per_s": 100.0,
+      "average_batch_size": 1,
+      "average_queue_depth": 0.0,
+      "completed": 12,
+      "completion_ratio": 1.0,
+      "duration_us": 118721,
+      "e2e_latency_us": {
+        "p50": 3041,
+        "p90": 8329,
+        "p95": 8721,
+        "p99": 8721
+      },
+      "eviction_count": 0,
+      "evidence_type": "SIMULATED",
+      "good_requests": 12,
+      "good_requests_per_s": 101.07731572341878,
+      "goodput_ratio": 1.0,
+      "internal_fragmentation_tokens": 0,
+      "iteration_count": 557,
+      "itl_available": true,
+      "kv_capacity_deferrals": 0,
+      "kv_peak_utilization": 0.07291666666666667,
+      "matched_prefix_tokens": 0,
+      "maximum_batch_size": 1,
+      "maximum_queue_depth": 1,
+      "output_token_throughput_per_s": 4497.940549692135,
+      "peak_allocated_blocks": 14,
+      "prefix_lookup_hit_rate": null,
+      "prefix_token_hit_rate": null,
+      "queue_delay_us": {
+        "p50": 0,
+        "p90": 0,
+        "p95": 0,
+        "p99": 0
+      },
+      "request_count": 12,
+      "request_throughput_per_s": 101.07731572341878,
+      "run_status": "completed",
+      "saved_simulated_prefill_tokens": 0,
+      "scheduled_prefill_tokens": 1089,
+      "schema_version": "serving-summary-v1",
+      "slo_violations": {
+        "e2e": 0,
+        "tpot": 0,
+        "ttft": 0
+      },
+      "stalled_iterations": 0,
+      "submitted": 12,
+      "total_token_throughput_per_s": 13670.70695159239,
+      "tpot_us": {
+        "p50": 93.0,
+        "p90": 93.0,
+        "p95": 93.0,
+        "p99": 93.0
+      },
+      "ttft_us": {
+        "p50": 351,
+        "p90": 1161,
+        "p95": 1181,
+        "p99": 1181
+      },
+      "unfinished": 0
+    }
+  },
+  {
+    "config_name": "mixed_low_load",
+    "evidence_type": "SIMULATED",
+    "result_path": "results/serving/raw/mixed_low_load.jsonl",
+    "summary": {
+      "arrival_rate_per_s": 33.33333333333333,
+      "average_batch_size": 1,
+      "average_queue_depth": 0.0,
+      "completed": 12,
+      "completion_ratio": 1.0,
+      "duration_us": 338721,
+      "e2e_latency_us": {
+        "p50": 3041,
+        "p90": 8329,
+        "p95": 8721,
+        "p99": 8721
+      },
+      "eviction_count": 0,
+      "evidence_type": "SIMULATED",
+      "good_requests": 12,
+      "good_requests_per_s": 35.427387141629836,
+      "goodput_ratio": 1.0,
+      "internal_fragmentation_tokens": 0,
+      "iteration_count": 557,
+      "itl_available": true,
+      "kv_capacity_deferrals": 0,
+      "kv_peak_utilization": 0.11458333333333333,
+      "matched_prefix_tokens": 192,
+      "maximum_batch_size": 1,
+      "maximum_queue_depth": 1,
+      "output_token_throughput_per_s": 1576.5187278025278,
+      "peak_allocated_blocks": 22,
+      "prefix_lookup_hit_rate": 0.6666666666666666,
+      "prefix_token_hit_rate": 0.5714285714285714,
+      "queue_delay_us": {
+        "p50": 0,
+        "p90": 0,
+        "p95": 0,
+        "p99": 0
+      },
+      "request_count": 12,
+      "request_throughput_per_s": 35.427387141629836,
+      "run_status": "completed",
+      "saved_simulated_prefill_tokens": 192,
+      "scheduled_prefill_tokens": 897,
+      "schema_version": "serving-summary-v1",
+      "slo_violations": {
+        "e2e": 0,
+        "tpot": 0,
+        "ttft": 0
+      },
+      "stalled_iterations": 0,
+      "submitted": 12,
+      "total_token_throughput_per_s": 4224.7159166393585,
+      "tpot_us": {
+        "p50": 93.0,
+        "p90": 93.0,
+        "p95": 93.0,
+        "p99": 93.0
+      },
+      "ttft_us": {
+        "p50": 311,
+        "p90": 1161,
+        "p95": 1181,
+        "p99": 1181
+      },
+      "unfinished": 0
+    }
+  },
+  {
+    "config_name": "mixed_overload",
+    "evidence_type": "SIMULATED",
+    "result_path": "results/serving/raw/mixed_overload.jsonl",
+    "summary": {
+      "arrival_rate_per_s": 2000.0000000000002,
+      "average_batch_size": 2.967391304347826,
+      "average_queue_depth": 1.895046404155368,
+      "completed": 12,
+      "completion_ratio": 1.0,
+      "duration_us": 26183,
+      "e2e_latency_us": {
+        "p50": 9733,
+        "p90": 17928,
+        "p95": 20683,
+        "p99": 20683
+      },
+      "eviction_count": 0,
+      "evidence_type": "SIMULATED",
+      "good_requests": 12,
+      "good_requests_per_s": 458.31264560974677,
+      "goodput_ratio": 1.0,
+      "internal_fragmentation_tokens": 0,
+      "iteration_count": 184,
+      "itl_available": true,
+      "kv_capacity_deferrals": 0,
+      "kv_peak_utilization": 0.19791666666666666,
+      "matched_prefix_tokens": 192,
+      "maximum_batch_size": 4,
+      "maximum_queue_depth": 6,
+      "output_token_throughput_per_s": 20394.912729633732,
+      "peak_allocated_blocks": 38,
+      "prefix_lookup_hit_rate": 0.6666666666666666,
+      "prefix_token_hit_rate": 0.5714285714285714,
+      "queue_delay_us": {
+        "p50": 1733,
+        "p90": 10623,
+        "p95": 10784,
+        "p99": 10784
+      },
+      "request_count": 12,
+      "request_throughput_per_s": 458.31264560974677,
+      "run_status": "completed",
+      "saved_simulated_prefill_tokens": 192,
+      "scheduled_prefill_tokens": 897,
+      "schema_version": "serving-summary-v1",
+      "slo_violations": {
+        "e2e": 0,
+        "tpot": 0,
+        "ttft": 0
+      },
+      "stalled_iterations": 0,
+      "submitted": 12,
+      "total_token_throughput_per_s": 54653.7829889623,
+      "tpot_us": {
+        "p50": 144.0,
+        "p90": 188.57894736842104,
+        "p95": 231.8,
+        "p99": 231.8
+      },
+      "ttft_us": {
+        "p50": 2826,
+        "p90": 11052,
+        "p95": 11123,
+        "p99": 11123
+      },
+      "unfinished": 0
+    }
+  }
+]
