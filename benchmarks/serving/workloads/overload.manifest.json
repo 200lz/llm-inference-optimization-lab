@@ -1,0 +1,21 @@
+{
+  "generator": "benchmarks/generate_serving_workload.py",
+  "generator_config": {
+    "arrival": {
+      "interval_us": 500,
+      "mode": "fixed_interval",
+      "start_time_us": 0
+    },
+    "request_count": 12,
+    "schema_version": "serving-workload-v1",
+    "seed": 20260719,
+    "workload_class": "overload"
+  },
+  "request_count": 12,
+  "schema_version": "serving-workload-manifest-v1",
+  "seed": 20260719,
+  "timestamp": null,
+  "workload_class": "overload",
+  "workload_schema_version": "serving-workload-v1",
+  "workload_sha256": "1ac8e7be89a24d8cef429aae6495d8777661f50707f0e1511f222058e7c0ade2"
+}

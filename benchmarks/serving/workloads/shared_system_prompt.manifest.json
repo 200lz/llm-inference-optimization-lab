@@ -1,0 +1,21 @@
+{
+  "generator": "benchmarks/generate_serving_workload.py",
+  "generator_config": {
+    "arrival": {
+      "interval_us": 10000,
+      "mode": "fixed_interval",
+      "start_time_us": 0
+    },
+    "request_count": 8,
+    "schema_version": "serving-workload-v1",
+    "seed": 20260719,
+    "workload_class": "shared_system_prompt"
+  },
+  "request_count": 8,
+  "schema_version": "serving-workload-manifest-v1",
+  "seed": 20260719,
+  "timestamp": null,
+  "workload_class": "shared_system_prompt",
+  "workload_schema_version": "serving-workload-v1",
+  "workload_sha256": "a80e4447ef0373f3a7b8aa764b0d9db33f95a5f46aa5bbd40b04bad9069dc70f"
+}

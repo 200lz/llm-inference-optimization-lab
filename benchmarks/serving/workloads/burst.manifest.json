@@ -1,0 +1,20 @@
+{
+  "generator": "benchmarks/generate_serving_workload.py",
+  "generator_config": {
+    "arrival": {
+      "mode": "burst",
+      "start_time_us": 0
+    },
+    "request_count": 8,
+    "schema_version": "serving-workload-v1",
+    "seed": 20260719,
+    "workload_class": "burst"
+  },
+  "request_count": 8,
+  "schema_version": "serving-workload-manifest-v1",
+  "seed": 20260719,
+  "timestamp": null,
+  "workload_class": "burst",
+  "workload_schema_version": "serving-workload-v1",
+  "workload_sha256": "4edf6c1755ccfd2ef78fd67d5132c21f4081dd10972a4bd9e56d4d89b8cb5805"
+}
