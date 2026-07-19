@@ -72,6 +72,14 @@ Implementation follows the repository's C++17, GCC/Ninja/CMake-preset convention
 - Compare FCFS and continuous batching across burstiness, prompt/output shape, and KV capacity. Label every result `simulated`.
 - Gate: hand-calculated fixtures validate every metric; conservation checks reconcile arrived requests, terminal requests, token counts, and KV block-time.
 
+**Status: implemented.** S6 provides `serving-workload-v1` JSONL replay,
+deterministic generators and manifests, a strict Python/TSV/C++ boundary,
+request/iteration/run records, service-level metrics, bounded matrices,
+provenance, reference SIMULATED summaries, CI smoke coverage, and the
+[final serving report](final_report.md). Exact tests cover nullable metric edge
+cases and conservation; the simulator still does not claim physical KV
+block-time or hardware calibration.
+
 ### S7 — calibration and sensitivity analysis
 
 - Fit or select simulated backend parameters from existing or newly collected llama.cpp CPU measurements while preserving source provenance.

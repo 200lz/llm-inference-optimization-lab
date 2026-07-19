@@ -13,8 +13,16 @@ Phase S3 adds a separate deterministic `ContinuousBatchingEngine` for
 iteration-level multiple-active execution while preserving that reference path.
 Phase S4 adds its metadata-only private block manager and capacity-aware plans.
 Phase S5 implements metadata-only prefix caching in that continuous engine.
-Preemption, swapping, distributed caching, workload replay, real tensors, and
-the llama.cpp adapter remain future architecture.
+Phase S6 adds deterministic workload replay, machine records, provenance, and
+service-level analysis without changing the engine lifecycle.
+Preemption, swapping, distributed caching, real tensors, and the llama.cpp
+adapter remain future architecture.
+
+Python validates versioned JSONL and emits strict temporary TSV; the
+project-owned `serving-benchmark-runner` invokes the existing engines and emits
+typed machine JSONL. Python attaches repository/submodule/config/workload
+provenance and derives nullable metrics. Human smoke output is not an API. See
+[workloads](workloads.md) and the [final report](final_report.md).
 
 ## System context
 

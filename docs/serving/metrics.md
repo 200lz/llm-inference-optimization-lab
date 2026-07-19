@@ -129,3 +129,51 @@ evidence.
 block matched. A partial prompt tail may remain and contribute scheduled
 prefill tokens. Count-only requests are publication-ineligible and do not
 contribute cache-eligible prompt tokens or cache misses.
+
+## S6 implemented aggregation
+
+S6 uses nearest-rank percentiles. For sorted population size `N`, the one-based
+rank is `ceil(p * N)`, clamped to `[1, N]`. Empty populations produce `null`/
+N/A; one observation returns that observation; duplicate observations are not
+deduplicated. The implemented percentiles are p50, p90, p95, and p99 and do not
+use NumPy defaults.
+
+Normalized JSON values are authoritative. Generated Markdown and README tables
+display rates and ratios to two decimal places and integer-microsecond
+percentiles as integers; display rounding never changes comparison inputs.
+
+The full-drain observation window is first arrival through last successful
+finish. Request, output-token, and total-token throughput divide by that
+positive simulated duration; zero duration produces null. Queue depth is
+derived from ordered arrival/admission transitions. Native decode-completion
+timestamps are included, so modeled token gaps are reconstructable; reports
+still use TPOT as the primary cadence metric.
+
+Checked-in SLO values are educational simulated thresholds, never production
+defaults. A finished request contributes to goodput when every configured,
+applicable TTFT, TPOT, and E2E threshold passes. A structurally undefined
+metric (zero-output TTFT or fewer-than-two-token TPOT) is inapplicable rather
+than silently zero. Reports include good requests per simulated second, the
+good/finished ratio, and violation counts by threshold.
+
+The versioned request workload is JSONL. Unknown top-level fields are rejected;
+extensions belong under the preserved `metadata` object. The Python layer
+reports JSONL line numbers, rejects schema mismatches and duplicate IDs, and
+translates validated data through a strict temporary TSV interface. Native
+request, iteration, and summary JSONL uses the closed
+`serving-simulator-v2` schema; the Python run provenance row uses the separately
+closed `serving-result-v1` schema. Required fields cannot be omitted, nullable
+fields must still be present, and unknown fields are rejected. The analyzer
+validates the entire stream before calculating any metric.
+
+For continuous batching, iteration sums must equal summary scheduled prefill,
+decode, and sequence totals. Nonempty, idle, stalled, deferred, maximum-batch,
+maximum-token, prefix, eviction, and KV-capacity counts are reconciled with the
+trace. Each admitted request has one explicit prefill appearance (including a
+zero-work full-prefix hit), and its decode appearances equal its generated
+token count. Iteration request IDs must exist in the request records. Request
+prompt/output totals and lifecycle states reconcile with the single terminal
+summary and, when the submitted workload is available, its immutable envelope.
+Single-active FCFS emits no iteration records, so its prompt/decode conservation
+is checked directly between request records and summary totals. See the
+[closed result envelope](workload_schema.md#closed-result-envelope).
