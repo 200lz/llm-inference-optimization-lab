@@ -58,11 +58,13 @@ std::string_view to_string(DeferralReason reason) noexcept {
 
 ContinuousBatchingConfig::ContinuousBatchingConfig(
     std::size_t max_num_sequences, std::uint64_t max_batched_tokens,
-    SchedulingPolicy scheduling_policy, KVCacheConfig kv_cache_config)
+    SchedulingPolicy scheduling_policy, KVCacheConfig kv_cache_config,
+    PrefixCacheConfig prefix_cache_config)
     : max_num_sequences_(max_num_sequences),
       max_batched_tokens_(max_batched_tokens),
       scheduling_policy_(scheduling_policy),
-      kv_cache_config_(kv_cache_config) {
+      kv_cache_config_(kv_cache_config),
+      prefix_cache_config_(std::move(prefix_cache_config)) {
   if (max_num_sequences_ == 0) {
     throw std::invalid_argument("max_num_sequences must be at least 1");
   }
@@ -161,10 +163,12 @@ BatchPlan BatchPlan::create_with_deferred(
   if (total_scheduled_tokens > max_batched_tokens) {
     throw std::invalid_argument("BatchPlan exceeds max_batched_tokens");
   }
-  return BatchPlan(iteration_number, std::move(prefill_request_ids),
+  BatchPlan result(iteration_number, std::move(prefill_request_ids),
                    std::move(decode_request_ids),
                    std::move(deferred_requests), total_prefill_tokens,
                    total_decode_tokens, total_scheduled_tokens);
+  result.prefill_work_ = std::move(prefill_work);
+  return result;
 }
 
 BatchPlan BatchPlan::empty(std::uint64_t iteration_number) {
@@ -180,9 +184,17 @@ std::optional<double> ContinuousBatchingStatistics::average_batch_size()
          static_cast<double>(nonempty_batch_count);
 }
 
+std::optional<double> ContinuousBatchingStatistics::prefix_token_hit_rate()
+    const noexcept {
+  if (total_cache_eligible_prompt_tokens_looked_up == 0) return std::nullopt;
+  return static_cast<double>(total_matched_prefix_tokens) /
+         static_cast<double>(total_cache_eligible_prompt_tokens_looked_up);
+}
+
 ContinuousBatchingEngine::ContinuousBatchingEngine(
     const SimulatedBackend& backend, ContinuousBatchingConfig config)
-    : backend_(backend), config_(config), kv_cache_(config.kv_cache_config()) {
+    : backend_(backend), config_(config),
+      kv_cache_(config.kv_cache_config(), config.prefix_cache_config()) {
   backend_.validate_configuration();
 }
 
@@ -202,7 +214,9 @@ void ContinuousBatchingEngine::submit_request(Request request) {
     throw std::invalid_argument(
         "request arrival precedes current simulation time");
   }
-  if (request.prompt_token_count > config_.max_batched_tokens()) {
+  if ((!config_.prefix_cache_config().enabled() ||
+       !request.has_exact_prompt_tokens()) &&
+      request.prompt_length() > config_.max_batched_tokens()) {
     throw std::invalid_argument(
         "prompt_token_count exceeds max_batched_tokens; chunked prefill is not implemented");
   }
@@ -250,6 +264,19 @@ void ContinuousBatchingEngine::cancel_request(RequestId request_id) {
       prepared_kv_cache.internal_fragmentation_tokens();
   prepared_statistics.kv_allocation_failure_count =
       prepared_kv_cache.allocation_failure_count();
+  prepared_statistics.cached_kv_blocks = prepared_kv_cache.cached_block_count();
+  prepared_statistics.referenced_shared_kv_blocks =
+      prepared_kv_cache.referenced_shared_block_count();
+  const PrefixCacheMetrics& cancelled_prefix = prepared_kv_cache.prefix_cache_metrics();
+  prepared_statistics.saved_simulated_prefill_tokens = cancelled_prefix.saved_prefill_token_count;
+  prepared_statistics.cache_lookup_count = cancelled_prefix.cache_lookup_count;
+  prepared_statistics.cache_hit_lookup_count = cancelled_prefix.cache_hit_lookup_count;
+  prepared_statistics.cache_miss_lookup_count = cancelled_prefix.cache_miss_lookup_count;
+  prepared_statistics.cache_matched_block_count = cancelled_prefix.matched_block_count;
+  prepared_statistics.total_cache_eligible_prompt_tokens_looked_up =
+      cancelled_prefix.total_cache_eligible_prompt_tokens_looked_up;
+  prepared_statistics.collision_verification_count = cancelled_prefix.collision_verification_count;
+  prepared_statistics.prefix_cache_eviction_count = cancelled_prefix.eviction_count;
 
   static_assert(std::is_nothrow_move_assignable_v<Request>);
   request = std::move(prepared_request);
@@ -317,13 +344,45 @@ BatchPlan ContinuousBatchingEngine::build_from_candidates(
     std::uint64_t iteration_number,
     const std::vector<Candidate>& candidates) const {
   std::vector<PrefillWork> prefills;
+  std::vector<DecodeWork> decode_work;
   std::vector<RequestId> decodes;
+  std::vector<PlannedWorkItem> work_order;
   std::vector<DeferredRequest> deferred;
+  std::vector<std::size_t> all_evictions;
+  std::vector<std::size_t> all_allocations;
   std::uint64_t used_tokens = 0;
-  std::size_t reserved_free_blocks = kv_cache_.free_block_count();
+  KVCacheManager local = kv_cache_;
   for (const Candidate& candidate : candidates) {
-    if (candidate.token_cost >
-        config_.max_batched_tokens() - used_tokens) {
+    const Request& request = requests_.at(candidate.request_id);
+    PrefixLookupResult lookup;
+    std::uint64_t token_cost = 1;
+    std::size_t blocks_required = 0;
+    if (candidate.is_prefill) {
+      if (config_.prefix_cache_config().enabled() &&
+          request.has_exact_prompt_tokens()) {
+        lookup = local.find_longest_cached_prefix(request.prompt_tokens());
+      } else {
+        lookup.kind = PrefixLookupKind::Disabled;
+      }
+      token_cost = request.prompt_length() - lookup.matched_token_count;
+      if (request.prompt_length() > config_.max_batched_tokens()) {
+        if (!config_.prefix_cache_config().enabled()) {
+          throw std::invalid_argument(
+              "prompt_token_count exceeds max_batched_tokens; chunked prefill is not implemented");
+        }
+        if (lookup.matched_token_count == 0 ||
+            token_cost > config_.max_batched_tokens()) {
+          throw std::invalid_argument("oversized unmatched prefill");
+        }
+      }
+      blocks_required = local.blocks_required(token_cost);
+    } else {
+      blocks_required = local.decode_requires_new_block(candidate.request_id)
+                            ? 1U
+                            : 0U;
+    }
+
+    if (token_cost > config_.max_batched_tokens() - used_tokens) {
       deferred.push_back(
           DeferredRequest{candidate.request_id, DeferralReason::TokenBudget});
       continue;
@@ -333,24 +392,95 @@ BatchPlan ContinuousBatchingEngine::build_from_candidates(
           DeferredRequest{candidate.request_id, DeferralReason::SequenceBudget});
       continue;
     }
-    if (candidate.kv_blocks_required > reserved_free_blocks) {
+
+    std::vector<std::size_t> evictable = local.eligible_eviction_order();
+    if (candidate.is_prefill && !lookup.physical_block_ids.empty()) {
+      evictable.erase(std::remove_if(evictable.begin(), evictable.end(),
+          [&](std::size_t id) {
+            return std::find(lookup.physical_block_ids.begin(),
+                             lookup.physical_block_ids.end(), id) !=
+                   lookup.physical_block_ids.end();
+          }), evictable.end());
+    }
+    if (blocks_required > local.free_block_count() + evictable.size()) {
       deferred.push_back(
           DeferredRequest{candidate.request_id, DeferralReason::KVCapacity});
       continue;
     }
-    used_tokens += candidate.token_cost;
-    reserved_free_blocks -= candidate.kv_blocks_required;
+
+    const std::size_t eviction_count = blocks_required > local.free_block_count()
+        ? blocks_required - local.free_block_count() : 0;
+    std::vector<std::size_t> evicted;
+    evicted.assign(evictable.begin(),
+                   evictable.begin() + static_cast<std::ptrdiff_t>(eviction_count));
+    std::set<std::size_t> available = local.free_block_ids();
+    available.insert(evicted.begin(), evicted.end());
+    std::vector<std::size_t> allocated;
+    auto available_it = available.begin();
+    for (std::size_t i = 0; i < blocks_required; ++i, ++available_it)
+      allocated.push_back(*available_it);
+
+    used_tokens += token_cost;
     if (candidate.is_prefill) {
-      prefills.push_back(
-          PrefillWork{candidate.request_id, candidate.token_cost});
+      if (config_.prefix_cache_config().enabled() &&
+          request.has_exact_prompt_tokens()) {
+        local.allocate_prompt_with_prefix_exact(candidate.request_id,
+            request.prompt_tokens(), lookup, evicted, allocated);
+      } else {
+        local.allocate_prompt_exact(candidate.request_id,
+            request.prompt_length(), evicted, allocated);
+      }
+      prefills.push_back(PrefillWork{candidate.request_id, token_cost,
+          request.prompt_length(), lookup.matched_token_count,
+          lookup.physical_block_ids, allocated, evicted, lookup.kind});
     } else {
+      const std::optional<std::size_t> allocation =
+          allocated.empty() ? std::nullopt
+                            : std::optional<std::size_t>(allocated.front());
+      local.append_decode_token_exact(candidate.request_id, evicted, allocation);
       decodes.push_back(candidate.request_id);
+      decode_work.push_back(DecodeWork{candidate.request_id, allocation, evicted});
     }
+    work_order.push_back(PlannedWorkItem{candidate.request_id,
+                                         candidate.is_prefill});
+    all_evictions.insert(all_evictions.end(), evicted.begin(), evicted.end());
+    all_allocations.insert(all_allocations.end(), allocated.begin(), allocated.end());
   }
-  return BatchPlan::create_with_deferred(
+  if (prefills.empty() && decodes.empty() && !deferred.empty()) {
+    for (const DeferredRequest& item : deferred) {
+      if (item.reason != DeferralReason::KVCapacity)
+        throw std::logic_error(
+            "token-only or sequence-only no-progress plan is invalid");
+    }
+    return BatchPlan::create_with_deferred(
+        iteration_number, {}, {}, std::move(deferred),
+        config_.max_num_sequences(), config_.max_batched_tokens());
+  }
+  const std::set<std::size_t> unique_evictions(all_evictions.begin(),
+                                                all_evictions.end());
+  const std::set<std::size_t> unique_allocations(all_allocations.begin(),
+                                                  all_allocations.end());
+  if (unique_evictions.size() != all_evictions.size())
+    throw std::logic_error("physical block is evicted twice in one plan");
+  if (unique_allocations.size() != all_allocations.size())
+    throw std::logic_error("physical block is allocated twice in one plan");
+  std::set<std::size_t> matched_ids;
+  for (const PrefillWork& work : prefills)
+    matched_ids.insert(work.matched_physical_block_ids.begin(),
+                       work.matched_physical_block_ids.end());
+  for (std::size_t id : matched_ids) {
+    if (unique_evictions.count(id) != 0 || unique_allocations.count(id) != 0)
+      throw std::logic_error("matched physical block has a conflicting plan role");
+  }
+  BatchPlan plan = BatchPlan::create_with_deferred(
       iteration_number, std::move(prefills), std::move(decodes),
       std::move(deferred), config_.max_num_sequences(),
       config_.max_batched_tokens());
+  plan.decode_work_ = std::move(decode_work);
+  plan.work_order_ = std::move(work_order);
+  plan.planned_eviction_ids_ = std::move(all_evictions);
+  plan.planned_allocation_ids_ = std::move(all_allocations);
+  return plan;
 }
 
 bool ContinuousBatchingEngine::candidate_less(const Candidate& lhs,
@@ -375,17 +505,12 @@ BatchPlan ContinuousBatchingEngine::build_decode_first(
     const Request& request = entry.second;
     if (request.state == RequestState::Decoding) {
       decodes.push_back(
-          Candidate{request.request_id, request.arrival_time_us, false, 1,
-                    kv_cache_.decode_requires_new_block(request.request_id)
-                        ? 1U
-                        : 0U});
+          Candidate{request.request_id, request.arrival_time_us, false});
     } else if (request.state == RequestState::Waiting &&
                arrived_requests.find(request.request_id) !=
                    arrived_requests.end()) {
-      prefills.push_back(Candidate{
-          request.request_id, request.arrival_time_us, true,
-          request.prompt_token_count,
-          kv_cache_.blocks_required(request.prompt_token_count)});
+      prefills.push_back(
+          Candidate{request.request_id, request.arrival_time_us, true});
     }
   }
   std::sort(decodes.begin(), decodes.end(), candidate_less);
@@ -402,17 +527,12 @@ BatchPlan ContinuousBatchingEngine::build_fcfs_mixed(
     const Request& request = entry.second;
     if (request.state == RequestState::Decoding) {
       candidates.push_back(
-          Candidate{request.request_id, request.arrival_time_us, false, 1,
-                    kv_cache_.decode_requires_new_block(request.request_id)
-                        ? 1U
-                        : 0U});
+          Candidate{request.request_id, request.arrival_time_us, false});
     } else if (request.state == RequestState::Waiting &&
                arrived_requests.find(request.request_id) !=
                    arrived_requests.end()) {
-      candidates.push_back(Candidate{
-          request.request_id, request.arrival_time_us, true,
-          request.prompt_token_count,
-          kv_cache_.blocks_required(request.prompt_token_count)});
+      candidates.push_back(
+          Candidate{request.request_id, request.arrival_time_us, true});
     }
   }
   std::sort(candidates.begin(), candidates.end(), candidate_less);
@@ -542,6 +662,26 @@ ContinuousBatchingStatistics ContinuousBatchingEngine::prepare_statistics(
       prepared_kv_cache.internal_fragmentation_tokens();
   prepared.kv_allocation_failure_count =
       prepared_kv_cache.allocation_failure_count();
+  for (const PrefillWork& work : plan.prefill_work()) {
+    prepared.total_original_prompt_tokens = checked_add_unsigned(
+        prepared.total_original_prompt_tokens, work.original_prompt_token_count,
+        "original prompt token total overflow");
+    prepared.total_matched_prefix_tokens = checked_add_unsigned(
+        prepared.total_matched_prefix_tokens, work.matched_prefix_token_count,
+        "matched prefix token total overflow");
+  }
+  const PrefixCacheMetrics& prefix = prepared_kv_cache.prefix_cache_metrics();
+  prepared.saved_simulated_prefill_tokens = prefix.saved_prefill_token_count;
+  prepared.cache_lookup_count = prefix.cache_lookup_count;
+  prepared.cache_hit_lookup_count = prefix.cache_hit_lookup_count;
+  prepared.cache_miss_lookup_count = prefix.cache_miss_lookup_count;
+  prepared.cache_matched_block_count = prefix.matched_block_count;
+  prepared.total_cache_eligible_prompt_tokens_looked_up =
+      prefix.total_cache_eligible_prompt_tokens_looked_up;
+  prepared.collision_verification_count = prefix.collision_verification_count;
+  prepared.prefix_cache_eviction_count = prefix.eviction_count;
+  prepared.cached_kv_blocks = prepared_kv_cache.cached_block_count();
+  prepared.referenced_shared_kv_blocks = prepared_kv_cache.referenced_shared_block_count();
   return prepared;
 }
 
@@ -550,13 +690,85 @@ ContinuousBatchingEngine::prepare_iteration(
     BatchPlan plan, std::set<RequestId> arrived_requests,
     std::int64_t time_value_us, bool time_value_is_duration) {
   KVCacheManager prepared_kv_cache = kv_cache_;
-  for (RequestId request_id : plan.prefill_request_ids()) {
-    const Request& request = requests_.at(request_id);
-    prepared_kv_cache.allocate_prompt(request_id,
-                                      request.prompt_token_count);
+  prepared_kv_cache.failure_point_for_test_ =
+      prepared_kv_failure_for_test_;
+  if (fail_reservation_match_for_test_ && !plan.work_order_.empty()) {
+    const PlannedWorkItem& last = plan.work_order_.back();
+    if (last.is_prefill) {
+      auto found = std::find_if(plan.prefill_work_.begin(),
+          plan.prefill_work_.end(), [&](const PrefillWork& work) {
+            return work.request_id == last.request_id;
+          });
+      if (found == plan.prefill_work_.end() ||
+          found->newly_allocated_block_ids.empty())
+        throw std::logic_error("reservation mismatch seam requires a prefill allocation");
+      found->newly_allocated_block_ids.back() =
+          prepared_kv_cache.config().total_num_blocks();
+    } else {
+      auto found = std::find_if(plan.decode_work_.begin(),
+          plan.decode_work_.end(), [&](const DecodeWork& work) {
+            return work.request_id == last.request_id;
+          });
+      if (found == plan.decode_work_.end() ||
+          !found->newly_allocated_block_id.has_value())
+        throw std::logic_error("reservation mismatch seam requires a decode allocation");
+      found->newly_allocated_block_id =
+          prepared_kv_cache.config().total_num_blocks();
+    }
   }
-  for (RequestId request_id : plan.decode_request_ids()) {
-    prepared_kv_cache.append_decode_token(request_id);
+  for (const PlannedWorkItem& item : plan.work_order()) {
+    if (item.is_prefill) {
+      const auto found = std::find_if(plan.prefill_work().begin(),
+          plan.prefill_work().end(), [&](const PrefillWork& work) {
+            return work.request_id == item.request_id;
+          });
+      if (found == plan.prefill_work().end())
+        throw std::logic_error("planned prefill work is missing");
+      const PrefillWork& work = *found;
+      const Request& request = requests_.at(work.request_id);
+      if (config_.prefix_cache_config().enabled() &&
+          request.has_exact_prompt_tokens()) {
+        PrefixLookupResult lookup;
+        lookup.matched_block_count = work.matched_physical_block_ids.size();
+        lookup.matched_token_count = work.matched_prefix_token_count;
+        lookup.physical_block_ids = work.matched_physical_block_ids;
+        lookup.kind = work.prefix_lookup_kind;
+        lookup.eligible_token_count = static_cast<std::uint64_t>(
+            request.prompt_tokens().size() /
+            prepared_kv_cache.config().block_size_tokens()) *
+            prepared_kv_cache.config().block_size_tokens();
+        prepared_kv_cache.allocate_prompt_with_prefix_exact(
+            work.request_id, request.prompt_tokens(), lookup,
+            work.evicted_block_ids, work.newly_allocated_block_ids);
+      } else {
+        prepared_kv_cache.allocate_prompt_exact(work.request_id,
+            request.prompt_length(), work.evicted_block_ids,
+            work.newly_allocated_block_ids);
+      }
+    } else {
+      const auto found = std::find_if(plan.decode_work().begin(),
+          plan.decode_work().end(), [&](const DecodeWork& work) {
+            return work.request_id == item.request_id;
+          });
+      if (found == plan.decode_work().end())
+        throw std::logic_error("planned decode work is missing");
+      prepared_kv_cache.append_decode_token_exact(
+          found->request_id, found->evicted_block_ids,
+          found->newly_allocated_block_id);
+    }
+  }
+  // Publish only after every request has acquired its iteration-start snapshot
+  // and allocated its private suffix: no same-plan insertion visibility.
+  for (const PrefillWork& work : plan.prefill_work()) {
+    const Request& request = requests_.at(work.request_id);
+    const std::size_t eligible_blocks = request.has_exact_prompt_tokens()
+        ? request.prompt_tokens().size() /
+              static_cast<std::size_t>(prepared_kv_cache.config().block_size_tokens())
+        : 0;
+    if (prepared_kv_cache.prefix_cache_config().enabled() &&
+        request.has_exact_prompt_tokens() &&
+        work.matched_physical_block_ids.size() < eligible_blocks)
+      prepared_kv_cache.insert_completed_prompt_blocks(work.request_id);
   }
   const std::int64_t end_timestamp_us = time_value_is_duration
       ? checked_add(clock_.now_us(), time_value_us)

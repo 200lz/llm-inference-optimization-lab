@@ -31,11 +31,12 @@ Active decodes that are deferred remain in `Decoding` and are reconsidered in
 later iterations. S4's independent `total_num_blocks` is the resident KV limit;
 it is not a per-iteration work limit.
 
-Each prefill consumes its complete `prompt_token_count`; each decode consumes
-one token unit. Chunked prefill is not implemented. Submission therefore
-rejects a prompt larger than `max_batched_tokens` synchronously, with an error
-naming the exceeded budget and missing chunked-prefill support. Rejection does
-not mutate engine state.
+Each uncached prefill token and each decode consumes one token unit. Chunked
+prefill is not implemented. With prefix caching disabled, count-only and
+exact-token prompts larger than `max_batched_tokens` are rejected synchronously
+and identically. An enabled exact-token oversized prompt is accepted only if a
+committed hit reduces unmatched work to the budget; otherwise planning rejects
+it deterministically as an oversized unmatched prefill.
 
 ## Scheduling iteration lifecycle
 
@@ -86,7 +87,8 @@ factories preserve these invariants:
 - scheduled sequences do not exceed `max_num_sequences`;
 - scheduled tokens do not exceed `max_batched_tokens`;
 - each decode ID contributes exactly one token;
-- each prefill contributes the complete prompt count;
+- each prefill contributes its unmatched prompt-token work (the complete
+  prompt count when caching is disabled or no prefix matches);
 - policy input order is preserved;
 - all totals are checked component sums.
 
@@ -101,8 +103,9 @@ candidate exceeds the remaining token budget, including when both budgets are
 exhausted. `SequenceBudget` is used only when the candidate still fits the
 token budget but no per-iteration sequence slot remains. `KVCapacity` is used
 only when both iteration budgets fit but the prompt or decode-boundary block
-reservation does not. The planner subtracts reservations from a local free
-count and never mutates or overcommits the live manager.
+reservation does not. The planner applies selected work to a private manager
+copy and records exact allocation and LRU-victim IDs. Deferred candidates
+reserve and protect nothing; planning never mutates the live manager.
 
 ## Policies
 
@@ -200,7 +203,7 @@ Both paths finish two requests and generate four output tokens. This is a
 **SIMULATED educational cost-model comparison**, not hardware speedup and not a
 claim that continuous batching universally improves latency or throughput.
 
-## S4 KV integration and limitations
+## S4/S5 KV integration and limitations
 
 S4 allocates each complete prompt before prefill and appends KV before a decode
 token is committed. Completion and active cancellation release private blocks;
@@ -211,9 +214,19 @@ Iteration preparation applies these operations to a copied metadata manager and
 commits it by swap. Trace rows contain post-iteration occupancy and read-only
 block tables. See [block KV-cache metadata](kv_cache.md).
 
+S5 exact-token requests add committed-state full-block prefix lookup. Batch
+cost uses unmatched tokens, local physical-ID planning reserves suffix blocks
+and deterministic evictions, and the trace records original/matched/scheduled
+tokens plus matched/new/evicted IDs. A zero-work full hit still consumes a
+sequence slot and advances lifecycle. New entries publish after all same-plan
+acquisitions and allocations, so they are reusable beginning next iteration.
+Count-only and disabled-cache workloads retain S4 behavior. See
+[prefix caching](prefix_cache.md).
+
 There are still no threads, true parallel execution, real K/V tensors,
-byte-level sizing, GPU/MN-Core timing, prefix sharing, eviction, swapping,
-preemption, HTTP/JSON, llama.cpp integration, model execution, or vLLM
-PagedAttention feature-parity claim. Whole-prompt prefill remains mandatory.
+byte-level sizing, GPU/MN-Core timing, swapping, preemption, chunked prefill,
+HTTP/JSON, llama.cpp integration, model execution, radix tree, distributed
+cache, or vLLM/SGLang feature-parity claim. Whole unmatched-suffix prefill is
+atomic.
 `Preempted` remains a reserved future lifecycle state and is never entered by
 S4; KV pressure produces only `KVCapacity` deferral or a nonterminal stall.

@@ -12,8 +12,9 @@ Phase S2 implements the deterministic single-active FCFS subset of this design.
 Phase S3 adds a separate deterministic `ContinuousBatchingEngine` for
 iteration-level multiple-active execution while preserving that reference path.
 Phase S4 adds its metadata-only private block manager and capacity-aware plans.
-Prefix caching, preemption, workload replay, and the llama.cpp adapter remain
-future architecture.
+Phase S5 implements metadata-only prefix caching in that continuous engine.
+Preemption, swapping, distributed caching, workload replay, real tensors, and
+the llama.cpp adapter remain future architecture.
 
 ## System context
 
@@ -128,7 +129,12 @@ invariants, transaction model, metrics, and S5 boundary.
 
 ### Prefix cache
 
-`PrefixCache` maps a collision-checked token-prefix key to immutable, block-aligned KV block chains and supports longest-prefix lookup. Hits require the same backend/model identity, tokenization identity, KV layout, block size, and relevant model/runtime configuration. Only complete blocks are reusable initially; unmatched and partial-block suffixes are prefilled normally. Deterministic LRU eviction uses `(last_access_time, insertion_sequence, key)`.
+The implemented S5 prefix index maps collision-checked token-prefix keys to
+immutable, block-aligned KV block chains and supports longest-prefix lookup.
+Namespace and salt provide the modeled compatibility boundary. Only complete
+blocks are reusable; unmatched and partial-block suffixes are prefilled
+normally. Deterministic LRU eviction orders eligible blocks by
+`(last_access_epoch, physical_block_id)`.
 
 The abstraction deliberately separates lookup policy from block storage so later experiments can compare disabled caching, exact-prefix caching, and alternative eviction policies without changing the scheduler.
 
@@ -231,3 +237,23 @@ The future CMake target names are `llm_lab_serving`, `serving_sim`, and `serving
 - CUDA kernel, GPU memory, tensor-parallel, speculative-decoding, or production fault modeling.
 - Bit- or time-accurate emulation of llama.cpp, vLLM, or SGLang.
 - Treating simulation output as a benchmark measurement.
+
+## Implemented S5 cache boundary
+
+The continuous engine now owns one `KVCacheManager` containing stable physical
+blocks, request block tables, an exact-key prefix index, references, and LRU
+metadata. Exact prompt tokens enter through `Request`; count-only requests keep
+the S1-S4 path. Planning reads committed cache state and reserves physical IDs.
+Iteration preparation mutates a copied manager and publishes by swap. See
+[S5 prefix caching](prefix_cache.md). This remains metadata-only and adds no
+tensor storage, byte layout, radix tree, distributed execution, preemption,
+swapping, or hardware timing.
+
+`Request` exposes one read-only prompt interpretation through
+`prompt_length()`, `has_exact_prompt_tokens()`, and `prompt_tokens()`. The KV
+manager preserves that choice as immutable per-request prompt provenance and
+records block provenance separately. Prefix publication is request-ID-only and
+is limited to the recorded newly computed full-prompt range; count-only
+requests, prompt tails, matched shared blocks, and decode blocks are excluded.
+The `AllEligibleBlocksHit` classification covers all complete eligible blocks,
+not necessarily a partial final prompt block.

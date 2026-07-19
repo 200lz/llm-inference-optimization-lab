@@ -67,6 +67,10 @@ deferred-only stalled iteration counts its KV deferrals and stall occurrence
 but performs no backend work and advances no simulated time. A zero-capacity or zero-duration
 configuration is invalid/undefined rather than zero utilization.
 
+Prefix caching reports successful deterministic eviction count only. There is
+no separate eviction-failure metric: planner `KVCapacity` deferral is expected
+control flow and is not an eviction failure.
+
 ### Preemption count
 
 This is a future metric and is not emitted by S4. A future implementation would
@@ -105,3 +109,23 @@ The same field also carries `backend`, `scheduler`, `workload_fingerprint`, and 
 ## Minimum output schema
 
 All result tables include `run_id`, schema version, evidence kind, metric name, scope (`request`, `token`, `iteration`, `cache`, or `run`), value, unit, aggregation, numerator/denominator where relevant, sample count, and configuration/workload fingerprints. Request rows add request ID and lifecycle timestamps; iteration rows add batch composition and effective capacity. This is a design contract, not a Phase S0 implementation.
+
+## S5 prefix-cache metrics
+
+S5 records lookup/hit/miss counts, matched blocks/tokens, eligible exact-token
+prompt tokens, reused requests, collision verifications, cached and referenced
+shared block counts, and evictions. `prefix_token_hit_rate` is matched tokens
+divided by cache-eligible complete-block prompt tokens looked up; it is
+undefined for a zero denominator.
+
+Physical represented tokens sum block occupancy once, whether a cached block
+has zero, one, or several request references. Logical matched tokens count per
+request reuse. Original prompt tokens, matched tokens, and scheduled prefill
+tokens are separate trace fields. `saved_simulated_prefill_tokens` is modeled
+work avoided; it is not actual latency, bandwidth, energy, GPU, or MN-Core
+evidence.
+
+`AllEligibleBlocksHit` counts a lookup where every complete exact-token prompt
+block matched. A partial prompt tail may remain and contribute scheduled
+prefill tokens. Count-only requests are publication-ineligible and do not
+contribute cache-eligible prompt tokens or cache misses.
