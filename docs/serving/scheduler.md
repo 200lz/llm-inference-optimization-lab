@@ -8,10 +8,12 @@ scheduling behavior. It uses one active request, no threads, and no wall clock.
 It does not implement continuous batching, preemption, a KV or prefix cache,
 model execution, or accelerator measurement.
 
-Phase S3 preserves this interface and policy unchanged. The separate
+Phases S3 and S4 preserve this interface and policy unchanged. The separate
 `ContinuousBatchingEngine`, its `DecodeFirst` and `FcfsMixed` policies, strict
 per-iteration budgets, budget-aware FCFS traversal, and immutable plans are documented in
-[continuous batching](continuous_batching.md).
+[continuous batching](continuous_batching.md). S4 adds independent resident
+block capacity to that engine; it does not retrofit KV behavior into the S2
+scheduler.
 
 ## Responsibility boundary
 

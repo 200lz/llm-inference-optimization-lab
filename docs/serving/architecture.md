@@ -11,8 +11,9 @@ This design borrows concepts used by vLLM- and SGLang-style systems—iteration-
 Phase S2 implements the deterministic single-active FCFS subset of this design.
 Phase S3 adds a separate deterministic `ContinuousBatchingEngine` for
 iteration-level multiple-active execution while preserving that reference path.
-The block cache, prefix cache, preemption, workload replay, and llama.cpp
-adapter shown here remain future architecture.
+Phase S4 adds its metadata-only private block manager and capacity-aware plans.
+Prefix caching, preemption, workload replay, and the llama.cpp adapter remain
+future architecture.
 
 ## System context
 
@@ -38,8 +39,15 @@ The event loop owns simulated time and request state. Schedulers make policy dec
 
 Each request has a stable ID, arrival time, prompt token IDs (or a token-count-only synthetic prompt), maximum output length, optional cancellation time, and optional service-level objectives. Runtime data includes state, generated-token count, reusable-prefix length, allocated block IDs, scheduling epochs, and lifecycle timestamps.
 
+The `Preempted` transitions in the following diagram are a **FUTURE TARGET,
+NOT IMPLEMENTED IN S4**.
+
 ```mermaid
 stateDiagram-v2
+    note right of Preempted
+      FUTURE TARGET
+      NOT IMPLEMENTED IN S4
+    end note
     [*] --> Waiting: arrival
     Waiting --> Prefilling: admitted
     Prefilling --> Decoding: prompt complete
@@ -56,7 +64,11 @@ stateDiagram-v2
     Cancelled --> [*]
 ```
 
-`Preempted` is an observable transition state: the request records a preemption, releases or preserves blocks according to the configured policy, and is requeued as `Waiting` at the same simulated timestamp. `Finished` and `Cancelled` are terminal. Invalid transitions fail the simulation instead of being silently repaired.
+The transitions involving `Preempted` are a **FUTURE TARGET, NOT IMPLEMENTED IN
+S4**. `Preempted` remains a reserved lifecycle value. S4 responds to KV pressure
+only with deterministic deferral or a nonterminal stalled result. `Finished`
+and `Cancelled` are terminal, and invalid implemented transitions fail the
+simulation instead of being silently repaired.
 
 ## Core abstractions
 
@@ -73,13 +85,12 @@ decode steps, and preemptions. Stable request ID breaks all policy ties.
 - Phase S3 deliberately does not retrofit the event-oriented scheduler
   interface. `ContinuousBatchingEngine` constructs immutable plans for either
   `DecodeFirst` or `FcfsMixed`, executes full prefills and one-token decode
-  steps atomically per iteration, and records a deterministic trace. It has no
-  cache-capacity input or preemption. A future cache-aware scheduler can receive
-  block pressure after the Phase S4 KV manager exists.
+  steps atomically per iteration, and records a deterministic trace. S4 adds
+  read-only KV capacity input and local plan reservations without preemption.
 
-Phase S3 policy configuration records maximum sequences and maximum tokens per
-iteration. Prefill chunk size, cache watermarks, and preemption mode remain
-future configuration.
+Policy configuration records maximum sequences and maximum tokens per
+iteration plus independent resident KV block capacity. Prefill chunk size,
+cache watermarks, and preemption mode remain future configuration.
 
 The Phase S3 sequence limit counts only work selected for the current
 iteration; it is not resident decode or KV capacity. Its engine prepares
@@ -104,9 +115,16 @@ An analytical cost calculation may be used inside `SimulatedBackend`, but an ana
 
 ### Block-based KV-cache manager
 
-`KvCacheManager` divides logical KV capacity into fixed-size token blocks. It provides deterministic allocate, append, retain, release, and capacity-query operations. A request maps logical token ranges to block IDs; the final block may be partially filled, but capacity accounting charges a full block. All block selection uses the lowest available block ID.
+`KVCacheManager` divides logical KV capacity into fixed-size token blocks. S4
+provides deterministic prompt allocation, decode append, release, and capacity
+queries. A request maps logical token ranges to ordered block IDs; the final
+block may be partially filled, but capacity accounting charges a full block.
+All block selection uses the lowest available ID.
 
-Prefix-owned blocks are immutable and reference-counted. Request-private blocks become reclaimable on finish or cancellation. On preemption, the configured policy either swaps no data and releases all private blocks (`recompute`) or retains blocks while the request waits (`retain`); the first implementation should support `recompute` only and make that limitation explicit. Internal invariants include unique ownership records, nonnegative reference counts, and `allocated <= capacity` after every event.
+S4 blocks are private and have reference count one while owned. They become
+free on finish or cancellation. There is no prefix ownership, sharing,
+eviction, swapping, or preemption. See [the S4 KV design](kv_cache.md) for its
+invariants, transaction model, metrics, and S5 boundary.
 
 ### Prefix cache
 
@@ -133,7 +151,11 @@ Simulated time is an integer tick type (`std::int64_t`), with the tick unit stor
 
 In the future target, arrivals are registered first, cancellation events are applied second, and backend completions third; then the scheduler runs once against the resulting state. Thus a request may arrive and be cancelled at the same timestamp, cancellation at the exact completion timestamp wins, a late completion for a cancelled request is ignored but audited, and new arrivals cannot retroactively join a completing batch. Event sequence makes repeated events stable. No wall clock, thread scheduling, unordered-container iteration, or random device may affect a simulated run; any stochastic generator uses an explicit seed and stable algorithm identifier.
 
-The loop jumps directly to the next event timestamp. Backend work is non-preemptible within one submitted iteration; preemption occurs only at iteration boundaries. Every state change emits an append-only event record suitable for replay and invariant checking.
+The loop jumps directly to the next event timestamp. Backend work is
+non-preemptible within one submitted iteration. Any future preemption design
+would operate only at iteration boundaries; S4 does not implement it. Every
+state change emits an append-only event record suitable for replay and
+invariant checking.
 
 ## Result provenance
 

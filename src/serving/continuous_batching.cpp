@@ -28,7 +28,8 @@ std::uint64_t checked_add_unsigned(std::uint64_t lhs, std::uint64_t rhs,
 
 bool valid_deferral_reason(DeferralReason reason) noexcept {
   return reason == DeferralReason::SequenceBudget ||
-         reason == DeferralReason::TokenBudget;
+         reason == DeferralReason::TokenBudget ||
+         reason == DeferralReason::KVCapacity;
 }
 
 }  // namespace
@@ -49,16 +50,19 @@ std::string_view to_string(DeferralReason reason) noexcept {
       return "sequence budget";
     case DeferralReason::TokenBudget:
       return "token budget";
+    case DeferralReason::KVCapacity:
+      return "KV capacity";
   }
   return "unknown";
 }
 
 ContinuousBatchingConfig::ContinuousBatchingConfig(
     std::size_t max_num_sequences, std::uint64_t max_batched_tokens,
-    SchedulingPolicy scheduling_policy)
+    SchedulingPolicy scheduling_policy, KVCacheConfig kv_cache_config)
     : max_num_sequences_(max_num_sequences),
       max_batched_tokens_(max_batched_tokens),
-      scheduling_policy_(scheduling_policy) {
+      scheduling_policy_(scheduling_policy),
+      kv_cache_config_(kv_cache_config) {
   if (max_num_sequences_ == 0) {
     throw std::invalid_argument("max_num_sequences must be at least 1");
   }
@@ -103,7 +107,8 @@ BatchPlan BatchPlan::create_with_deferred(
   if (max_num_sequences == 0 || max_batched_tokens == 0) {
     throw std::invalid_argument("BatchPlan budgets must be positive");
   }
-  if (prefill_work.empty() && decode_request_ids.empty()) {
+  if (prefill_work.empty() && decode_request_ids.empty() &&
+      deferred_requests.empty()) {
     throw std::invalid_argument("use BatchPlan::empty for a zero-work plan");
   }
   if (prefill_work.size() > max_num_sequences ||
@@ -139,6 +144,14 @@ BatchPlan BatchPlan::create_with_deferred(
           "deferred request also appears elsewhere in BatchPlan");
     }
   }
+  if (prefill_work.empty() && decode_request_ids.empty()) {
+    for (const DeferredRequest& deferred : deferred_requests) {
+      if (deferred.reason != DeferralReason::KVCapacity) {
+        throw std::invalid_argument(
+            "deferred-only BatchPlan requires KVCapacity reasons");
+      }
+    }
+  }
 
   const auto total_decode_tokens =
       static_cast<std::uint64_t>(decode_request_ids.size());
@@ -169,7 +182,7 @@ std::optional<double> ContinuousBatchingStatistics::average_batch_size()
 
 ContinuousBatchingEngine::ContinuousBatchingEngine(
     const SimulatedBackend& backend, ContinuousBatchingConfig config)
-    : backend_(backend), config_(config) {
+    : backend_(backend), config_(config), kv_cache_(config.kv_cache_config()) {
   backend_.validate_configuration();
 }
 
@@ -223,10 +236,25 @@ void ContinuousBatchingEngine::cancel_request(RequestId request_id) {
   prepared_request.finish_time_us = clock_.now_us();
   std::set<RequestId> prepared_arrivals = arrived_requests_;
   prepared_arrivals.erase(request_id);
+  KVCacheManager prepared_kv_cache = kv_cache_;
+  if (request.state == RequestState::Decoding) {
+    prepared_kv_cache.release_request(request_id);
+  }
+  prepared_statistics.current_allocated_kv_blocks =
+      prepared_kv_cache.allocated_block_count();
+  prepared_statistics.current_kv_block_utilization =
+      prepared_kv_cache.utilization();
+  prepared_statistics.represented_kv_tokens =
+      prepared_kv_cache.represented_token_count();
+  prepared_statistics.internal_fragmentation_tokens =
+      prepared_kv_cache.internal_fragmentation_tokens();
+  prepared_statistics.kv_allocation_failure_count =
+      prepared_kv_cache.allocation_failure_count();
 
   static_assert(std::is_nothrow_move_assignable_v<Request>);
   request = std::move(prepared_request);
   arrived_requests_.swap(prepared_arrivals);
+  kv_cache_.swap(prepared_kv_cache);
   statistics_ = prepared_statistics;
 }
 
@@ -292,6 +320,7 @@ BatchPlan ContinuousBatchingEngine::build_from_candidates(
   std::vector<RequestId> decodes;
   std::vector<DeferredRequest> deferred;
   std::uint64_t used_tokens = 0;
+  std::size_t reserved_free_blocks = kv_cache_.free_block_count();
   for (const Candidate& candidate : candidates) {
     if (candidate.token_cost >
         config_.max_batched_tokens() - used_tokens) {
@@ -304,16 +333,19 @@ BatchPlan ContinuousBatchingEngine::build_from_candidates(
           DeferredRequest{candidate.request_id, DeferralReason::SequenceBudget});
       continue;
     }
+    if (candidate.kv_blocks_required > reserved_free_blocks) {
+      deferred.push_back(
+          DeferredRequest{candidate.request_id, DeferralReason::KVCapacity});
+      continue;
+    }
     used_tokens += candidate.token_cost;
+    reserved_free_blocks -= candidate.kv_blocks_required;
     if (candidate.is_prefill) {
       prefills.push_back(
           PrefillWork{candidate.request_id, candidate.token_cost});
     } else {
       decodes.push_back(candidate.request_id);
     }
-  }
-  if (prefills.empty() && decodes.empty()) {
-    throw std::logic_error("runnable work cannot fit validated budgets");
   }
   return BatchPlan::create_with_deferred(
       iteration_number, std::move(prefills), std::move(decodes),
@@ -343,12 +375,17 @@ BatchPlan ContinuousBatchingEngine::build_decode_first(
     const Request& request = entry.second;
     if (request.state == RequestState::Decoding) {
       decodes.push_back(
-          Candidate{request.request_id, request.arrival_time_us, false, 1});
+          Candidate{request.request_id, request.arrival_time_us, false, 1,
+                    kv_cache_.decode_requires_new_block(request.request_id)
+                        ? 1U
+                        : 0U});
     } else if (request.state == RequestState::Waiting &&
                arrived_requests.find(request.request_id) !=
                    arrived_requests.end()) {
-      prefills.push_back(Candidate{request.request_id, request.arrival_time_us,
-                                   true, request.prompt_token_count});
+      prefills.push_back(Candidate{
+          request.request_id, request.arrival_time_us, true,
+          request.prompt_token_count,
+          kv_cache_.blocks_required(request.prompt_token_count)});
     }
   }
   std::sort(decodes.begin(), decodes.end(), candidate_less);
@@ -365,13 +402,17 @@ BatchPlan ContinuousBatchingEngine::build_fcfs_mixed(
     const Request& request = entry.second;
     if (request.state == RequestState::Decoding) {
       candidates.push_back(
-          Candidate{request.request_id, request.arrival_time_us, false, 1});
+          Candidate{request.request_id, request.arrival_time_us, false, 1,
+                    kv_cache_.decode_requires_new_block(request.request_id)
+                        ? 1U
+                        : 0U});
     } else if (request.state == RequestState::Waiting &&
                arrived_requests.find(request.request_id) !=
                    arrived_requests.end()) {
-      candidates.push_back(Candidate{request.request_id,
-                                     request.arrival_time_us, true,
-                                     request.prompt_token_count});
+      candidates.push_back(Candidate{
+          request.request_id, request.arrival_time_us, true,
+          request.prompt_token_count,
+          kv_cache_.blocks_required(request.prompt_token_count)});
     }
   }
   std::sort(candidates.begin(), candidates.end(), candidate_less);
@@ -441,12 +482,16 @@ ContinuousBatchingEngine::prepare_request_updates(
 }
 
 ContinuousBatchingStatistics ContinuousBatchingEngine::prepare_statistics(
-    const BatchPlan& plan, std::uint64_t completed_request_count) const {
+    const BatchPlan& plan, std::uint64_t completed_request_count,
+    const KVCacheManager& prepared_kv_cache) const {
   ContinuousBatchingStatistics prepared = statistics_;
   prepared.scheduling_iteration_count = checked_incremented(
       prepared.scheduling_iteration_count,
       "scheduling iteration count overflow");
-  if (plan.empty()) {
+  if (plan.deferred_only()) {
+    prepared.stalled_iteration_count = checked_incremented(
+        prepared.stalled_iteration_count, "stalled iteration count overflow");
+  } else if (plan.empty()) {
     prepared.idle_iteration_count = checked_incremented(
         prepared.idle_iteration_count, "idle iteration count overflow");
   } else {
@@ -468,6 +513,16 @@ ContinuousBatchingStatistics ContinuousBatchingEngine::prepare_statistics(
       prepared.deferred_request_count,
       static_cast<std::uint64_t>(plan.deferred_requests().size()),
       "deferred request count overflow");
+  std::uint64_t kv_deferrals = 0;
+  for (const DeferredRequest& deferred : plan.deferred_requests()) {
+    if (deferred.reason == DeferralReason::KVCapacity) {
+      kv_deferrals = checked_incremented(
+          kv_deferrals, "iteration KV deferral count overflow");
+    }
+  }
+  prepared.kv_capacity_deferral_count = checked_add_unsigned(
+      prepared.kv_capacity_deferral_count, kv_deferrals,
+      "KV-capacity deferral count overflow");
   prepared.completed_request_count = checked_add_unsigned(
       prepared.completed_request_count, completed_request_count,
       "completed request count overflow");
@@ -475,13 +530,37 @@ ContinuousBatchingStatistics ContinuousBatchingEngine::prepare_statistics(
       std::max(prepared.maximum_batch_size, sequences);
   prepared.maximum_scheduled_tokens = std::max(
       prepared.maximum_scheduled_tokens, plan.total_scheduled_tokens());
+  prepared.current_allocated_kv_blocks =
+      prepared_kv_cache.allocated_block_count();
+  prepared.peak_allocated_kv_blocks =
+      prepared_kv_cache.peak_allocated_block_count();
+  prepared.current_kv_block_utilization = prepared_kv_cache.utilization();
+  prepared.peak_kv_block_utilization = prepared_kv_cache.peak_utilization();
+  prepared.represented_kv_tokens =
+      prepared_kv_cache.represented_token_count();
+  prepared.internal_fragmentation_tokens =
+      prepared_kv_cache.internal_fragmentation_tokens();
+  prepared.kv_allocation_failure_count =
+      prepared_kv_cache.allocation_failure_count();
   return prepared;
 }
 
 ContinuousBatchingEngine::PreparedIteration
 ContinuousBatchingEngine::prepare_iteration(
     BatchPlan plan, std::set<RequestId> arrived_requests,
-    std::int64_t end_timestamp_us) {
+    std::int64_t time_value_us, bool time_value_is_duration) {
+  KVCacheManager prepared_kv_cache = kv_cache_;
+  for (RequestId request_id : plan.prefill_request_ids()) {
+    const Request& request = requests_.at(request_id);
+    prepared_kv_cache.allocate_prompt(request_id,
+                                      request.prompt_token_count);
+  }
+  for (RequestId request_id : plan.decode_request_ids()) {
+    prepared_kv_cache.append_decode_token(request_id);
+  }
+  const std::int64_t end_timestamp_us = time_value_is_duration
+      ? checked_add(clock_.now_us(), time_value_us)
+      : time_value_us;
   if (end_timestamp_us < clock_.now_us()) {
     throw std::logic_error("prepared iteration moves time backwards");
   }
@@ -493,13 +572,33 @@ ContinuousBatchingEngine::prepare_iteration(
     request_updates = prepare_request_updates(
         plan, end_timestamp_us, arrived_requests, completed_request_count);
   }
+  // Same-plan completions cannot donate capacity. Lifecycle results are ready,
+  // and release occurs only after every planned allocation/append succeeded.
+  for (RequestId request_id : plan.prefill_request_ids()) {
+    const Request& request = requests_.at(request_id);
+    if (request.max_new_tokens == 0) {
+      prepared_kv_cache.release_request(request_id);
+    }
+  }
+  for (RequestId request_id : plan.decode_request_ids()) {
+    const Request& request = requests_.at(request_id);
+    if (request.generated_token_count + 1 == request.max_new_tokens) {
+      prepared_kv_cache.release_request(request_id);
+    }
+  }
   ContinuousBatchingStatistics prepared_statistics =
-      prepare_statistics(plan, completed_request_count);
+      prepare_statistics(plan, completed_request_count, prepared_kv_cache);
   const std::uint64_t prepared_next_iteration = checked_incremented(
       next_iteration_number_, "iteration number overflow");
   BatchTraceEntry trace_entry{plan.iteration_number(), clock_.now_us(),
                               end_timestamp_us, config_.scheduling_policy(),
-                              std::move(plan)};
+                              std::move(plan),
+                              prepared_kv_cache.allocated_block_count(),
+                              prepared_kv_cache.free_block_count(),
+                              prepared_kv_cache.represented_token_count(),
+                              prepared_kv_cache.internal_fragmentation_tokens(),
+                              prepared_kv_cache.utilization(),
+                              prepared_kv_cache.block_tables()};
   if (fail_trace_preparation_for_test_) {
     throw std::runtime_error("injected trace preparation failure");
   }
@@ -510,7 +609,7 @@ ContinuousBatchingEngine::prepare_iteration(
   return PreparedIteration{std::move(arrived_requests),
                            std::move(request_updates), prepared_statistics,
                            std::move(trace_entry), prepared_next_iteration,
-                           prepared_clock};
+                           prepared_clock, std::move(prepared_kv_cache)};
 }
 
 void ContinuousBatchingEngine::commit_iteration(
@@ -524,11 +623,12 @@ void ContinuousBatchingEngine::commit_iteration(
     *update.target = std::move(update.value);
   }
   statistics_ = prepared.statistics;
+  kv_cache_.swap(prepared.kv_cache);
   next_iteration_number_ = prepared.next_iteration_number;
   plan_trace_.push_back(std::move(prepared.trace_entry));
 }
 
-bool ContinuousBatchingEngine::run_next_iteration() {
+IterationResult ContinuousBatchingEngine::run_next_iteration() {
   if (failed_) {
     throw std::logic_error("cannot run a failed continuous engine");
   }
@@ -537,42 +637,52 @@ bool ContinuousBatchingEngine::run_next_iteration() {
     if (!has_runnable_work(prepared_arrivals)) {
       const auto next_arrival = next_future_arrival(prepared_arrivals);
       if (!next_arrival.has_value()) {
-        return false;
+        return IterationResult::complete();
       }
       const BatchPlan plan = BatchPlan::empty(next_iteration_number_);
       PreparedIteration prepared = prepare_iteration(
-          plan, std::move(prepared_arrivals), *next_arrival);
+          plan, std::move(prepared_arrivals), *next_arrival, false);
       commit_iteration(std::move(prepared));
-      return true;
+      return IterationResult::progressed();
     }
 
     const BatchPlan plan =
         build_plan(next_iteration_number_, prepared_arrivals);
-    if (plan.empty()) {
-      throw std::logic_error("runnable work cannot fit a validated budget");
+    if (plan.deferred_only()) {
+      PreparedIteration prepared = prepare_iteration(
+          plan, std::move(prepared_arrivals), clock_.now_us(), false);
+      commit_iteration(std::move(prepared));
+      return IterationResult::stalled();
     }
     const auto duration_us = backend_.estimate_batch_time_us(
         plan.total_prefill_tokens(), plan.total_decode_tokens(),
         static_cast<std::uint64_t>(plan.scheduled_sequence_count()));
-    const auto end_timestamp_us = checked_add(clock_.now_us(), duration_us);
     PreparedIteration prepared = prepare_iteration(
-        plan, std::move(prepared_arrivals), end_timestamp_us);
+        plan, std::move(prepared_arrivals), duration_us, true);
     commit_iteration(std::move(prepared));
-    return true;
+    return IterationResult::progressed();
   } catch (...) {
     failed_ = true;
     throw;
   }
 }
 
-void ContinuousBatchingEngine::run() {
-  while (run_next_iteration()) {
+RunResult ContinuousBatchingEngine::run() {
+  while (true) {
+    const IterationResult result = run_next_iteration();
+    if (result.is_stalled()) {
+      return RunResult::Stalled;
+    }
+    if (result.outcome() == IterationOutcome::Complete) {
+      break;
+    }
   }
   if (has_runnable_work(arrived_requests_) ||
       next_future_arrival(arrived_requests_).has_value()) {
     failed_ = true;
     throw std::logic_error("continuous simulation drained with unfinished work");
   }
+  return RunResult::Completed;
 }
 
 void ContinuousBatchingEngine::require_results_available() const {
@@ -611,6 +721,11 @@ ContinuousBatchingEngine::statistics() const {
 const SimulationClock& ContinuousBatchingEngine::clock() const {
   require_results_available();
   return clock_;
+}
+
+const KVCacheManager& ContinuousBatchingEngine::kv_cache() const {
+  require_results_available();
+  return kv_cache_;
 }
 
 }  // namespace llm_lab::serving
