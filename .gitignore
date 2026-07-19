@@ -5,6 +5,7 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.artifacts/
 *.egg-info/
 
 # CMake and native build outputs
@@ -32,6 +33,22 @@ benchmarks/results/
 results/*
 !results/.gitkeep
 !results/README.md
+!results/serving/
+results/serving/*
+!results/serving/report.md
+!results/serving/summary.json
+!results/serving/summary.csv
+!results/serving/command_manifest.json
+!results/serving/raw/
+results/serving/raw/*
+!results/serving/raw/fcfs_chat_small.jsonl
+!results/serving/raw/continuous_chat_small.jsonl
+!results/serving/raw/shared_prefix_cache_off.jsonl
+!results/serving/raw/shared_prefix_cache_on.jsonl
+!results/serving/raw/kv_small.jsonl
+!results/serving/raw/kv_large.jsonl
+!results/serving/raw/mixed_low_load.jsonl
+!results/serving/raw/mixed_overload.jsonl
 *.benchmark.json
 *.benchmark.csv
 benchmark-results/

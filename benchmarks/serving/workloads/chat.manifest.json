@@ -1,0 +1,21 @@
+{
+  "generator": "benchmarks/generate_serving_workload.py",
+  "generator_config": {
+    "arrival": {
+      "mean_interval_us": 12000,
+      "mode": "exponential",
+      "start_time_us": 0
+    },
+    "request_count": 8,
+    "schema_version": "serving-workload-v1",
+    "seed": 20260719,
+    "workload_class": "chat"
+  },
+  "request_count": 8,
+  "schema_version": "serving-workload-manifest-v1",
+  "seed": 20260719,
+  "timestamp": null,
+  "workload_class": "chat",
+  "workload_schema_version": "serving-workload-v1",
+  "workload_sha256": "0cd64e95f53acf8784628fa28ede56f4fa92d403441dc436bae9bc57f8e274e7"
+}

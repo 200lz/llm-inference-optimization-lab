@@ -1,0 +1,1 @@
+{"schema_version":"serving-workload-v1","workload_class":"shared_system_prompt","request_count":8,"seed":20260719,"arrival":{"mode":"fixed_interval","interval_us":10000,"start_time_us":0}}

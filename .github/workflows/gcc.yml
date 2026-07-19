@@ -17,3 +17,8 @@ jobs:
         run: cmake --build --preset debug
       - name: Test
         run: ctest --preset debug --output-on-failure
+      - name: Tiny S6 serving smoke
+        run: |
+          python benchmarks/generate_serving_workload.py configs/serving/workloads/burst.json --output /tmp/burst.jsonl --manifest /tmp/burst.manifest.json
+          python benchmarks/run_serving_simulation.py configs/serving/continuous_chat_small.json --output /tmp/serving-result.jsonl
+          python benchmarks/analyze_serving_results.py /tmp/serving-result.jsonl --json /tmp/serving-summary.json

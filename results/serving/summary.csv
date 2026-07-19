@@ -1,0 +1,9 @@
+config_name,evidence_type,run_status,submitted,completed,completion_ratio,stalled_iterations,request_throughput_per_s,p99_ttft_us,p99_e2e_us,goodput_ratio,kv_capacity_deferrals,prefix_token_hit_rate
+fcfs_chat_small,SIMULATED,completed,8,8,1.0,0,68.9387737515619,946,3745,1.0,0,
+continuous_chat_small,SIMULATED,completed,8,8,1.0,0,67.96710392170189,521,6230,1.0,0,
+shared_prefix_cache_off,SIMULATED,completed,8,8,1.0,0,110.20498126515318,556,2592,1.0,0,
+shared_prefix_cache_on,SIMULATED,completed,8,8,1.0,0,110.69293779056896,536,2272,1.0,0,0.875
+kv_small,SIMULATED,stalled,12,1,0.08333333333333333,1,605.6935190793458,256,1651,1.0,1,
+kv_large,SIMULATED,completed,12,12,1.0,0,101.07731572341878,1181,8721,1.0,0,
+mixed_low_load,SIMULATED,completed,12,12,1.0,0,35.427387141629836,1181,8721,1.0,0,0.5714285714285714
+mixed_overload,SIMULATED,completed,12,12,1.0,0,458.31264560974677,11123,20683,1.0,0,0.5714285714285714

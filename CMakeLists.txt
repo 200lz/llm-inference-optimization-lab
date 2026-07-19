@@ -16,6 +16,47 @@ target_compile_options(native_smoke PRIVATE
   $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic>
 )
 
+add_library(llm_lab_serving
+  src/serving/continuous_batching.cpp
+  src/serving/fcfs_scheduler.cpp
+  src/serving/kv_cache.cpp
+  src/serving/request.cpp
+  src/serving/simulated_backend.cpp
+  src/serving/simulation_engine.cpp
+)
+target_include_directories(llm_lab_serving PUBLIC include)
+target_compile_options(llm_lab_serving PRIVATE
+  $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic>
+)
+
+add_executable(serving-sim-smoke src/serving/serving_sim_smoke.cpp)
+target_link_libraries(serving-sim-smoke PRIVATE llm_lab_serving)
+target_compile_options(serving-sim-smoke PRIVATE
+  $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic>
+)
+
+add_executable(continuous-batching-smoke
+  src/serving/continuous_batching_smoke.cpp
+)
+target_link_libraries(continuous-batching-smoke PRIVATE llm_lab_serving)
+target_compile_options(continuous-batching-smoke PRIVATE
+  $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic>
+)
+
+add_executable(prefix-cache-smoke src/serving/prefix_cache_smoke.cpp)
+target_link_libraries(prefix-cache-smoke PRIVATE llm_lab_serving)
+target_compile_options(prefix-cache-smoke PRIVATE
+  $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic>
+)
+
+add_executable(serving-benchmark-runner
+  src/serving/serving_benchmark_runner.cpp
+)
+target_link_libraries(serving-benchmark-runner PRIVATE llm_lab_serving)
+target_compile_options(serving-benchmark-runner PRIVATE
+  $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic>
+)
+
 add_library(q4_hotpath_kernels
   kernels/q4_hotpath/reference/q6_q8_reference.cpp
   kernels/q4_hotpath/baseline/q6_q8_baseline.cpp
@@ -52,7 +93,53 @@ target_compile_options(q8_rn2_scale_bench PRIVATE $<$<CXX_COMPILER_ID:GNU,Clang>
 
 include(CTest)
 if(BUILD_TESTING)
+  add_executable(serving_tests tests/serving/test_simulator.cpp)
+  target_link_libraries(serving_tests PRIVATE llm_lab_serving)
+  target_compile_options(serving_tests PRIVATE
+    $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic>
+  )
+
+  add_executable(serving_scheduler_tests tests/serving/test_scheduler.cpp)
+  target_link_libraries(serving_scheduler_tests PRIVATE llm_lab_serving)
+  target_compile_options(serving_scheduler_tests PRIVATE
+    $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic>
+  )
+
+  add_executable(continuous_batching_tests
+    tests/serving/test_continuous_batching.cpp
+  )
+  target_link_libraries(continuous_batching_tests PRIVATE llm_lab_serving)
+  target_compile_options(continuous_batching_tests PRIVATE
+    $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic>
+  )
+
+  add_executable(kv_cache_tests tests/serving/test_kv_cache.cpp)
+  target_link_libraries(kv_cache_tests PRIVATE llm_lab_serving)
+  target_compile_options(kv_cache_tests PRIVATE
+    $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic>
+  )
+
+  add_executable(prefix_cache_tests tests/serving/test_prefix_cache.cpp)
+  target_link_libraries(prefix_cache_tests PRIVATE llm_lab_serving)
+  target_compile_options(prefix_cache_tests PRIVATE
+    $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic>
+  )
+
+  add_executable(prefix_cache_fix_c_tests
+    tests/serving/test_prefix_cache_fix_c.cpp
+  )
+  target_link_libraries(prefix_cache_fix_c_tests PRIVATE llm_lab_serving)
+  target_compile_options(prefix_cache_fix_c_tests PRIVATE
+    $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic>
+  )
+
   add_test(NAME native_smoke COMMAND native_smoke)
+  add_test(NAME serving_simulator COMMAND serving_tests)
+  add_test(NAME serving_scheduler COMMAND serving_scheduler_tests)
+  add_test(NAME serving_continuous_batching COMMAND continuous_batching_tests)
+  add_test(NAME serving_kv_cache COMMAND kv_cache_tests)
+  add_test(NAME serving_prefix_cache COMMAND prefix_cache_tests)
+  add_test(NAME serving_prefix_cache_fix_c COMMAND prefix_cache_fix_c_tests)
   add_test(NAME kernel_q4_hotpath_correctness COMMAND kernel_q4_hotpath_test)
   add_test(NAME q8_rn2_scale_correctness COMMAND q8_rn2_scale_test)
 endif()

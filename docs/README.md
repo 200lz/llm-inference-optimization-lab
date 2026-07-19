@@ -10,6 +10,22 @@ Start with the [final technical report](final_report.md) for the complete narrat
 - [Benchmark methodology](benchmarking.md)
 - [CPU profiling environment](profiling_environment.md)
 
+## Serving simulator design
+
+- [Architecture](serving/architecture.md)
+- [Development plan](serving/development_plan.md)
+- [Metric definitions and evidence semantics](serving/metrics.md)
+- [Phase S2 simulator](serving/simulator.md)
+- [Phase S2 scheduler and FCFS policy](serving/scheduler.md)
+- [Phase S3 deterministic continuous batching](serving/continuous_batching.md)
+- [Phase S4 deterministic block KV-cache metadata](serving/kv_cache.md)
+- [Phase S5 deterministic prefix cache](serving/prefix_cache.md)
+- [Prefix-cache comparison with vLLM and SGLang concepts](serving/prefix_cache_comparison.md)
+- [Phase S6 final serving report](serving/final_report.md)
+- [Canonical workload schema](serving/workload_schema.md) and [generator details](serving/workloads.md)
+- [Educational llama.cpp/vLLM/SGLang comparison](serving/engine_comparison.md)
+- [Interview notes](serving/interview_notes.md)
+
 ## Results by phase
 
 - Phase 3: [Q4_K_M CPU baseline](results/cpu_baseline_q4.md)

@@ -1,0 +1,8 @@
+{"arrival_time_us":0,"max_new_tokens":8,"prompt_token_count":16,"request_id":"burst-0000","schema_version":"serving-workload-v1","workload_class":"burst"}
+{"arrival_time_us":0,"max_new_tokens":9,"prompt_token_count":24,"request_id":"burst-0001","schema_version":"serving-workload-v1","workload_class":"burst"}
+{"arrival_time_us":0,"max_new_tokens":10,"prompt_token_count":32,"request_id":"burst-0002","schema_version":"serving-workload-v1","workload_class":"burst"}
+{"arrival_time_us":0,"max_new_tokens":11,"prompt_token_count":40,"request_id":"burst-0003","schema_version":"serving-workload-v1","workload_class":"burst"}
+{"arrival_time_us":0,"max_new_tokens":12,"prompt_token_count":16,"request_id":"burst-0004","schema_version":"serving-workload-v1","workload_class":"burst"}
+{"arrival_time_us":0,"max_new_tokens":13,"prompt_token_count":24,"request_id":"burst-0005","schema_version":"serving-workload-v1","workload_class":"burst"}
+{"arrival_time_us":0,"max_new_tokens":14,"prompt_token_count":32,"request_id":"burst-0006","schema_version":"serving-workload-v1","workload_class":"burst"}
+{"arrival_time_us":0,"max_new_tokens":15,"prompt_token_count":40,"request_id":"burst-0007","schema_version":"serving-workload-v1","workload_class":"burst"}

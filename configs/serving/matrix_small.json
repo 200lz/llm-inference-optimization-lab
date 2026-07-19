@@ -1,0 +1,73 @@
+{
+  "schema_version": "serving-matrix-v1",
+  "evidence_type": "SIMULATED",
+  "max_default_runs": 8,
+  "command_manifest": "results/serving/command_manifest.json",
+  "comparisons": {
+    "scheduler": {
+      "configs": [
+        "fcfs_chat_small",
+        "continuous_chat_small"
+      ],
+      "metrics": [
+        "ttft",
+        "e2e",
+        "throughput",
+        "goodput",
+        "batch_size"
+      ]
+    },
+    "prefix_cache": {
+      "configs": [
+        "shared_prefix_cache_off",
+        "shared_prefix_cache_on"
+      ],
+      "metrics": [
+        "scheduled_prefill_tokens",
+        "matched_tokens",
+        "prefix_token_hit_rate",
+        "kv_peak_usage",
+        "ttft",
+        "throughput",
+        "eviction_count"
+      ]
+    },
+    "kv_capacity": {
+      "configs": [
+        "kv_small",
+        "kv_large"
+      ],
+      "metrics": [
+        "kv_capacity_deferrals",
+        "stalled_iterations",
+        "completion_rate",
+        "tail_latency",
+        "peak_utilization"
+      ]
+    },
+    "load_sweep": {
+      "configs": [
+        "mixed_low_load",
+        "mixed_overload"
+      ],
+      "metrics": [
+        "arrival_rate",
+        "throughput",
+        "p99_ttft",
+        "queue_delay",
+        "goodput_ratio",
+        "stalled_iterations"
+      ]
+    }
+  },
+  "configs": [
+    "configs/serving/fcfs_chat_small.json",
+    "configs/serving/continuous_chat_small.json",
+    "configs/serving/shared_prefix_cache_off.json",
+    "configs/serving/shared_prefix_cache_on.json",
+    "configs/serving/kv_small.json",
+    "configs/serving/kv_large.json",
+    "configs/serving/mixed_low_load.json",
+    "configs/serving/mixed_overload.json"
+  ]
+}

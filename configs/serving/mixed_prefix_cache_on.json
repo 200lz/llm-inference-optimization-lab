@@ -1,0 +1,40 @@
+{
+  "schema_version": "serving-benchmark-config-v1",
+  "name": "mixed_prefix_cache_on",
+  "evidence_type": "simulated",
+  "execution_mode": "continuous_batching",
+  "scheduling_policy": "DecodeFirst",
+  "max_num_sequences": 4,
+  "max_batched_tokens": 512,
+  "kv_cache": {
+    "total_blocks": 128,
+    "block_size_tokens": 16
+  },
+  "prefix_cache": {
+    "enabled": true,
+    "namespace": "educational-model-v1",
+    "salt": "s6-demo"
+  },
+  "backend": {
+    "prefill_base_us": 100,
+    "prefill_per_token_us": 8,
+    "prefill_per_active_sequence_us": 5,
+    "decode_base_us": 40,
+    "decode_per_active_sequence_us": 12,
+    "batch_base_us": 80,
+    "batch_prefill_per_token_us": 5,
+    "batch_decode_per_sequence_us": 10,
+    "batch_active_sequence_overhead_us": 3
+  },
+  "slos": {
+    "ttft_slo_us": 20000,
+    "tpot_slo_us": 500,
+    "e2e_slo_us": 100000
+  },
+  "workload": {
+    "path": "benchmarks/serving/workloads/mixed_medium.jsonl",
+    "manifest_path": "benchmarks/serving/workloads/mixed_medium.manifest.json"
+  },
+  "output_path": "results/serving/raw/mixed_prefix_cache_on.jsonl",
+  "run_seed": 20260719
+}
