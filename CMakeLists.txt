@@ -16,6 +16,22 @@ target_compile_options(native_smoke PRIVATE
   $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic>
 )
 
+add_library(llm_lab_serving
+  src/serving/request.cpp
+  src/serving/simulated_backend.cpp
+  src/serving/simulation_engine.cpp
+)
+target_include_directories(llm_lab_serving PUBLIC include)
+target_compile_options(llm_lab_serving PRIVATE
+  $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic>
+)
+
+add_executable(serving-sim-smoke src/serving/serving_sim_smoke.cpp)
+target_link_libraries(serving-sim-smoke PRIVATE llm_lab_serving)
+target_compile_options(serving-sim-smoke PRIVATE
+  $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic>
+)
+
 add_library(q4_hotpath_kernels
   kernels/q4_hotpath/reference/q6_q8_reference.cpp
   kernels/q4_hotpath/baseline/q6_q8_baseline.cpp
@@ -52,7 +68,14 @@ target_compile_options(q8_rn2_scale_bench PRIVATE $<$<CXX_COMPILER_ID:GNU,Clang>
 
 include(CTest)
 if(BUILD_TESTING)
+  add_executable(serving_tests tests/serving/test_simulator.cpp)
+  target_link_libraries(serving_tests PRIVATE llm_lab_serving)
+  target_compile_options(serving_tests PRIVATE
+    $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic>
+  )
+
   add_test(NAME native_smoke COMMAND native_smoke)
+  add_test(NAME serving_simulator COMMAND serving_tests)
   add_test(NAME kernel_q4_hotpath_correctness COMMAND kernel_q4_hotpath_test)
   add_test(NAME q8_rn2_scale_correctness COMMAND q8_rn2_scale_test)
 endif()
