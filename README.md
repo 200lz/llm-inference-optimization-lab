@@ -1,5 +1,7 @@
 # LLM Inference Optimization and Serving Engine Lab
 
+[![Ubuntu GCC](https://github.com/200lz/llm-inference-optimization-lab/actions/workflows/gcc.yml/badge.svg?branch=main)](https://github.com/200lz/llm-inference-optimization-lab/actions/workflows/gcc.yml) [![Ubuntu Clang](https://github.com/200lz/llm-inference-optimization-lab/actions/workflows/clang.yml/badge.svg?branch=main)](https://github.com/200lz/llm-inference-optimization-lab/actions/workflows/clang.yml) [![Python Tests](https://github.com/200lz/llm-inference-optimization-lab/actions/workflows/python.yml/badge.svg?branch=main)](https://github.com/200lz/llm-inference-optimization-lab/actions/workflows/python.yml)
+
 Two complementary systems tracks examine LLM inference at different boundaries: **measured llama.cpp CPU profiling and hot-path optimization**, and a **simulated mini LLM serving engine for scheduling, KV-cache, prefix-cache, and workload analysis**. The first asks where real CPU time goes; the second isolates how serving policies interact under a deterministic model.
 
 > [!IMPORTANT]
@@ -15,6 +17,20 @@ The CPU track uses a pinned [llama.cpp](https://github.com/ggml-org/llama.cpp) r
 The serving track is a dependency-free C++17 simulator with Python workload and analysis tools. It covers deterministic request replay; single-active FCFS; continuous batching; block-based KV allocation; exact full-block prefix caching; collision verification; reference counting; deterministic LRU; and TTFT, TPOT, P95/P99 latency, throughput, and SLO goodput.
 
 Together, the tracks keep three boundaries explicit: real kernel measurements, extracted microbenchmark results, and modeled serving behavior are not interchangeable.
+
+## Serving architecture
+
+```mermaid
+flowchart LR
+    A[Requests] --> B[FCFS / Continuous Scheduler]
+    B --> C[Batch Plan]
+    C --> D[Simulated Backend]
+    B --> E[Block KV Cache]
+    E --> F[Prefix Cache + LRU]
+    D --> G[Request Lifecycle]
+    F --> G
+    G --> H[TTFT / TPOT / Tail Latency / Goodput]
+```
 
 ## Results
 ## Key implementation files
@@ -95,15 +111,7 @@ versioned JSONL -> Python validation -> strict temporary TSV
   -> C++ FCFS or continuous engine -> typed JSONL records
   -> Python reconciliation, metrics, and provenance
 ```
-flowchart LR
-    A[Requests] --> B[FCFS / Continuous Scheduler]
-    B --> C[Batch Plan]
-    C --> D[Simulated Backend]
-    B --> E[KV Cache Manager]
-    E --> F[Prefix Cache + LRU]
-    D --> G[Request Metrics]
-    F --> G
-    
+
 ## Quick start
 
 Run commands from the repository root in Linux/WSL2.
