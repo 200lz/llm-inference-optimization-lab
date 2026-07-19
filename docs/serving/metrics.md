@@ -48,15 +48,32 @@ Also report request hit rate (`requests reusing at least one token / eligible re
 
 ### KV utilization
 
-Instantaneous utilization is `allocated KV blocks / total KV blocks`, including shared prefix blocks once per physical block. The run summary is time-weighted utilization:
+Instantaneous utilization is `allocated KV blocks / total KV blocks`. S4 has
+only private blocks; a future shared prefix block would still be counted once
+per physical block. The run summary is time-weighted utilization:
 
 `sum(allocated_blocks * interval_duration) / (total_blocks * observation_duration)`.
 
-Report peak utilization, private/shared block-time, allocation failures, and internal fragmentation (`unused token slots in allocated tail blocks / total allocated token slots`) separately. A zero-capacity or zero-duration configuration is invalid/undefined rather than zero utilization.
+S4 reports peak allocated blocks and peak utilization. Its absolute internal
+fragmentation metric is
+`allocated_blocks * block_size_tokens - represented_tokens`; this counts unused
+modeled token slots, not bytes. A later summary may additionally report that
+value divided by total allocated token slots as a ratio. Planner
+`KVCapacity` deferrals count once per request per iteration and remain separate
+from manager allocation failures. The allocation-failure count includes only
+otherwise valid prompt or decode-boundary operations that lack physical blocks;
+validation, arithmetic, epoch, and host-container failures are excluded. A
+deferred-only stalled iteration counts its KV deferrals and stall occurrence
+but performs no backend work and advances no simulated time. A zero-capacity or zero-duration
+configuration is invalid/undefined rather than zero utilization.
 
 ### Preemption count
 
-Count each active-to-`Preempted` transition. Report total preemptions, requests preempted at least once, preemptions per finished request, and recomputed prompt tokens. Ordinary iteration boundaries and voluntary completion are not preemptions.
+This is a future metric and is not emitted by S4. A future implementation would
+count each active-to-`Preempted` transition and report total preemptions,
+requests preempted at least once, preemptions per finished request, and
+recomputed prompt tokens. Ordinary iteration boundaries and voluntary
+completion are not preemptions.
 
 ### Batch utilization
 

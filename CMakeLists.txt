@@ -19,6 +19,7 @@ target_compile_options(native_smoke PRIVATE
 add_library(llm_lab_serving
   src/serving/continuous_batching.cpp
   src/serving/fcfs_scheduler.cpp
+  src/serving/kv_cache.cpp
   src/serving/request.cpp
   src/serving/simulated_backend.cpp
   src/serving/simulation_engine.cpp
@@ -98,10 +99,17 @@ if(BUILD_TESTING)
     $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic>
   )
 
+  add_executable(kv_cache_tests tests/serving/test_kv_cache.cpp)
+  target_link_libraries(kv_cache_tests PRIVATE llm_lab_serving)
+  target_compile_options(kv_cache_tests PRIVATE
+    $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic>
+  )
+
   add_test(NAME native_smoke COMMAND native_smoke)
   add_test(NAME serving_simulator COMMAND serving_tests)
   add_test(NAME serving_scheduler COMMAND serving_scheduler_tests)
   add_test(NAME serving_continuous_batching COMMAND continuous_batching_tests)
+  add_test(NAME serving_kv_cache COMMAND kv_cache_tests)
   add_test(NAME kernel_q4_hotpath_correctness COMMAND kernel_q4_hotpath_test)
   add_test(NAME q8_rn2_scale_correctness COMMAND q8_rn2_scale_test)
 endif()

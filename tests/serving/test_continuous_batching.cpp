@@ -59,6 +59,10 @@ struct ContinuousBatchingEngineTestAccess {
       const ContinuousBatchingEngine& engine) {
     return engine.next_iteration_number_;
   }
+  static const KVCacheManager& raw_kv_cache(
+      const ContinuousBatchingEngine& engine) {
+    return engine.kv_cache_;
+  }
 };
 
 }  // namespace llm_lab::serving::test
@@ -129,6 +133,7 @@ bool same_statistics(const ContinuousBatchingStatistics& lhs,
   return lhs.scheduling_iteration_count == rhs.scheduling_iteration_count &&
          lhs.nonempty_batch_count == rhs.nonempty_batch_count &&
          lhs.idle_iteration_count == rhs.idle_iteration_count &&
+         lhs.stalled_iteration_count == rhs.stalled_iteration_count &&
          lhs.total_prefill_tokens_scheduled ==
              rhs.total_prefill_tokens_scheduled &&
          lhs.total_decode_tokens_scheduled ==
@@ -138,7 +143,17 @@ bool same_statistics(const ContinuousBatchingStatistics& lhs,
          lhs.maximum_scheduled_tokens == rhs.maximum_scheduled_tokens &&
          lhs.deferred_request_count == rhs.deferred_request_count &&
          lhs.completed_request_count == rhs.completed_request_count &&
-         lhs.cancelled_request_count == rhs.cancelled_request_count;
+         lhs.cancelled_request_count == rhs.cancelled_request_count &&
+         lhs.current_allocated_kv_blocks == rhs.current_allocated_kv_blocks &&
+         lhs.peak_allocated_kv_blocks == rhs.peak_allocated_kv_blocks &&
+         lhs.current_kv_block_utilization ==
+             rhs.current_kv_block_utilization &&
+         lhs.peak_kv_block_utilization == rhs.peak_kv_block_utilization &&
+         lhs.represented_kv_tokens == rhs.represented_kv_tokens &&
+         lhs.internal_fragmentation_tokens ==
+             rhs.internal_fragmentation_tokens &&
+         lhs.kv_allocation_failure_count == rhs.kv_allocation_failure_count &&
+         lhs.kv_capacity_deferral_count == rhs.kv_capacity_deferral_count;
 }
 
 bool same_plan(const BatchPlan& lhs, const BatchPlan& rhs) {
@@ -172,7 +187,16 @@ bool same_trace(const std::vector<BatchTraceEntry>& lhs,
         lhs[index].start_timestamp_us != rhs[index].start_timestamp_us ||
         lhs[index].end_timestamp_us != rhs[index].end_timestamp_us ||
         lhs[index].policy != rhs[index].policy ||
-        !same_plan(lhs[index].plan, rhs[index].plan)) {
+        !same_plan(lhs[index].plan, rhs[index].plan) ||
+        lhs[index].allocated_kv_blocks != rhs[index].allocated_kv_blocks ||
+        lhs[index].free_kv_blocks != rhs[index].free_kv_blocks ||
+        lhs[index].represented_kv_tokens !=
+            rhs[index].represented_kv_tokens ||
+        lhs[index].internal_fragmentation_tokens !=
+            rhs[index].internal_fragmentation_tokens ||
+        lhs[index].kv_block_utilization !=
+            rhs[index].kv_block_utilization ||
+        lhs[index].kv_block_tables != rhs[index].kv_block_tables) {
       return false;
     }
   }
@@ -186,6 +210,7 @@ struct EngineSnapshot {
   ContinuousBatchingStatistics statistics;
   std::int64_t clock_us;
   std::uint64_t next_iteration;
+  KVCacheManager kv_cache;
 };
 
 EngineSnapshot snapshot(const ContinuousBatchingEngine& engine) {
@@ -195,7 +220,8 @@ EngineSnapshot snapshot(const ContinuousBatchingEngine& engine) {
       ContinuousBatchingEngineTestAccess::raw_trace(engine),
       ContinuousBatchingEngineTestAccess::raw_statistics(engine),
       ContinuousBatchingEngineTestAccess::raw_clock_us(engine),
-      ContinuousBatchingEngineTestAccess::raw_next_iteration(engine)};
+      ContinuousBatchingEngineTestAccess::raw_next_iteration(engine),
+      ContinuousBatchingEngineTestAccess::raw_kv_cache(engine)};
 }
 
 bool unchanged(const ContinuousBatchingEngine& engine,
@@ -222,7 +248,24 @@ bool unchanged(const ContinuousBatchingEngine& engine,
          ContinuousBatchingEngineTestAccess::raw_clock_us(engine) ==
              before.clock_us &&
          ContinuousBatchingEngineTestAccess::raw_next_iteration(engine) ==
-             before.next_iteration;
+             before.next_iteration &&
+         ContinuousBatchingEngineTestAccess::raw_kv_cache(engine)
+                 .physical_blocks() == before.kv_cache.physical_blocks() &&
+         ContinuousBatchingEngineTestAccess::raw_kv_cache(engine)
+                 .free_block_ids() == before.kv_cache.free_block_ids() &&
+         ContinuousBatchingEngineTestAccess::raw_kv_cache(engine)
+                 .block_tables() == before.kv_cache.block_tables() &&
+         ContinuousBatchingEngineTestAccess::raw_kv_cache(engine)
+                 .represented_token_count() ==
+             before.kv_cache.represented_token_count() &&
+         ContinuousBatchingEngineTestAccess::raw_kv_cache(engine)
+                 .peak_allocated_block_count() ==
+             before.kv_cache.peak_allocated_block_count() &&
+         ContinuousBatchingEngineTestAccess::raw_kv_cache(engine)
+                 .allocation_failure_count() ==
+             before.kv_cache.allocation_failure_count() &&
+         ContinuousBatchingEngineTestAccess::raw_kv_cache(engine)
+                 .access_epoch() == before.kv_cache.access_epoch();
 }
 
 static_assert(!std::is_default_constructible_v<BatchPlan>);
@@ -571,6 +614,28 @@ void test_deferral_reason_precedence() {
           "token-only exhaustion has the wrong reason");
   require(reason_for_second(1, 1) == DeferralReason::TokenBudget,
           "both-budget exhaustion did not use token precedence");
+
+  const auto kv_reason_for_second = [&](std::size_t sequences,
+                                        std::uint64_t tokens) {
+    ContinuousBatchingEngine engine(
+        backend, ContinuousBatchingConfig(
+                     sequences, tokens, SchedulingPolicy::FcfsMixed,
+                     KVCacheConfig(1, 1)));
+    engine.submit_request(Request({1}, 0, 1, 0));
+    engine.submit_request(Request({2}, 0, 1, 0));
+    require(engine.run_next_iteration().made_progress(),
+            "combined KV precedence scenario did not run");
+    const auto& deferred = engine.plan_trace().back().plan.deferred_requests();
+    require(deferred.size() == 1 && deferred[0].request_id == RequestId{2},
+            "combined KV precedence selected the wrong request");
+    return deferred[0].reason;
+  };
+  require(kv_reason_for_second(2, 1) == DeferralReason::TokenBudget,
+          "token and KV exhaustion did not use token precedence");
+  require(kv_reason_for_second(1, 2) == DeferralReason::SequenceBudget,
+          "sequence and KV exhaustion did not use sequence precedence");
+  require(kv_reason_for_second(2, 2) == DeferralReason::KVCapacity,
+          "KV-only exhaustion did not use KVCapacity");
 }
 
 void test_active_decode_deferral_reasons() {
@@ -674,13 +739,17 @@ void test_policy_difference_on_same_workload() {
 void test_per_iteration_sequence_limit_is_not_residency() {
   const auto backend = SimulatedBackend({0, 0, 0, 0, 0, 0, 0, 0, 0});
   ContinuousBatchingEngine engine(
-      backend, ContinuousBatchingConfig(1, 1, SchedulingPolicy::FcfsMixed));
-  engine.submit_request(Request({10}, 0, 0, 2));
+      backend, ContinuousBatchingConfig(1, 1, SchedulingPolicy::FcfsMixed,
+                                       KVCacheConfig(3, 2)));
+  engine.submit_request(Request({10}, 0, 1, 2));
   require(engine.run_next_iteration(), "first resident decode setup failed");
-  engine.submit_request(Request({5}, 0, 0, 1));
+  engine.submit_request(Request({5}, 0, 1, 1));
   require(engine.run_next_iteration(), "second resident decode setup failed");
   require(engine.request({5}).state == RequestState::Decoding &&
-              engine.request({10}).state == RequestState::Decoding,
+              engine.request({10}).state == RequestState::Decoding &&
+              !engine.kv_cache().block_table({5}).empty() &&
+              !engine.kv_cache().block_table({10}).empty() &&
+              engine.kv_cache().allocated_block_count() == 2,
           "per-iteration limit was treated as resident capacity");
   for (const auto& entry : engine.plan_trace()) {
     require(entry.plan.scheduled_sequence_count() <= 1,
@@ -830,6 +899,8 @@ void require_terminal_failure_contract(ContinuousBatchingEngine& engine,
                                    "statistics survived terminal failure");
   require_throws<std::logic_error>([&] { (void)engine.clock(); },
                                    "clock survived terminal failure");
+  require_throws<std::logic_error>([&] { (void)engine.kv_cache(); },
+                                   "KV diagnostics survived terminal failure");
 }
 
 void require_iteration_failure_is_transactional(
@@ -882,14 +953,29 @@ void test_iteration_two_phase_failure_guarantee() {
   {
     ContinuousBatchingEngine engine(
         zero_backend,
-        ContinuousBatchingConfig(1, 1, SchedulingPolicy::DecodeFirst));
-    engine.submit_request(Request({1}, 0, 0, 0));
-    engine.submit_request(Request({2}, 0, 0, 0));
+        ContinuousBatchingConfig(2, 2, SchedulingPolicy::DecodeFirst,
+                                 KVCacheConfig(1, 1)));
+    engine.submit_request(Request({1}, 0, 1, 0));
+    engine.submit_request(Request({2}, 0, 1, 0));
     auto stats = ContinuousBatchingEngineTestAccess::raw_statistics(engine);
     stats.deferred_request_count = std::numeric_limits<std::uint64_t>::max();
     ContinuousBatchingEngineTestAccess::set_statistics(engine, stats);
     require_iteration_failure_is_transactional(engine, {1},
                                                 "deferred count overflow");
+  }
+  {
+    ContinuousBatchingEngine engine(
+        zero_backend,
+        ContinuousBatchingConfig(2, 2, SchedulingPolicy::DecodeFirst,
+                                 KVCacheConfig(1, 1)));
+    engine.submit_request(Request({1}, 0, 1, 0));
+    engine.submit_request(Request({2}, 0, 1, 0));
+    auto stats = ContinuousBatchingEngineTestAccess::raw_statistics(engine);
+    stats.kv_capacity_deferral_count =
+        std::numeric_limits<std::uint64_t>::max();
+    ContinuousBatchingEngineTestAccess::set_statistics(engine, stats);
+    require_iteration_failure_is_transactional(engine, {1},
+                                                "KV deferral count overflow");
   }
   {
     auto engine = make_single();
@@ -909,13 +995,265 @@ void test_iteration_two_phase_failure_guarantee() {
         SimulatedBackend({0, 0, 0, 0, 0, 1, 0, 0, 0});
     ContinuousBatchingEngine engine(
         unit_backend,
-        ContinuousBatchingConfig(1, 1, SchedulingPolicy::DecodeFirst));
+        ContinuousBatchingConfig(1, 1, SchedulingPolicy::DecodeFirst,
+                                 KVCacheConfig(1, 1)));
     engine.submit_request(Request(
-        {1}, std::numeric_limits<std::int64_t>::max(), 0, 0));
+        {1}, std::numeric_limits<std::int64_t>::max(), 1, 0));
     require(engine.run_next_iteration(), "timestamp setup idle jump failed");
     require_iteration_failure_is_transactional(engine, {1},
                                                 "timestamp overflow");
   }
+  {
+    ContinuousBatchingEngine engine(
+        zero_backend,
+        ContinuousBatchingConfig(1, 2, SchedulingPolicy::DecodeFirst,
+                                 KVCacheConfig(2, 2)));
+    engine.submit_request(Request({1}, 0, 1, 2));
+    require(engine.run_next_iteration(), "resident KV setup failed");
+    require(engine.kv_cache().allocated_block_count() == 1 &&
+                !engine.kv_cache().block_table({1}).empty(),
+            "resident KV failure fixture has no material allocation");
+    auto stats = ContinuousBatchingEngineTestAccess::raw_statistics(engine);
+    stats.scheduling_iteration_count =
+        std::numeric_limits<std::uint64_t>::max();
+    ContinuousBatchingEngineTestAccess::set_statistics(engine, stats);
+    require_iteration_failure_is_transactional(engine, {1},
+                                                "resident KV statistics overflow");
+  }
+}
+
+ContinuousBatchingConfig kv_config(std::size_t sequences,
+                                   std::uint64_t tokens,
+                                   std::size_t blocks,
+                                   std::uint64_t block_size) {
+  return ContinuousBatchingConfig(sequences, tokens,
+                                  SchedulingPolicy::DecodeFirst,
+                                  KVCacheConfig(blocks, block_size));
+}
+
+void test_deferred_only_kv_stalls_are_nonterminal() {
+  const auto backend = batch_backend();
+  ContinuousBatchingEngine prompt(backend, kv_config(1, 4, 1, 2));
+  prompt.submit_request(Request({1}, 0, 3, 1));
+  const auto prompt_before = snapshot(prompt);
+  const IterationResult prompt_result = prompt.run_next_iteration();
+  require(prompt_result.is_stalled() && !prompt.failed() &&
+              prompt.clock().now_us() == prompt_before.clock_us &&
+              same_request(prompt.request({1}), prompt_before.requests.at({1})) &&
+              prompt.kv_cache().physical_blocks() ==
+                  prompt_before.kv_cache.physical_blocks() &&
+              prompt.kv_cache().free_block_ids() ==
+                  prompt_before.kv_cache.free_block_ids(),
+          "isolated prompt KV stall mutated work or failed the engine");
+  const auto& prompt_trace = prompt.plan_trace();
+  require(prompt_trace.size() == 1 && prompt_trace[0].plan.deferred_only() &&
+              prompt_trace[0].start_timestamp_us == 0 &&
+              prompt_trace[0].end_timestamp_us == 0 &&
+              prompt_trace[0].plan.deferred_requests().size() == 1 &&
+              prompt_trace[0].plan.deferred_requests()[0].request_id ==
+                  RequestId{1} &&
+              prompt_trace[0].plan.deferred_requests()[0].reason ==
+                  DeferralReason::KVCapacity &&
+              prompt.statistics().scheduling_iteration_count == 1 &&
+              prompt.statistics().stalled_iteration_count == 1 &&
+              prompt.statistics().nonempty_batch_count == 0 &&
+              prompt.statistics().idle_iteration_count == 0 &&
+              prompt.statistics().kv_capacity_deferral_count == 1 &&
+              prompt.statistics().kv_allocation_failure_count == 0,
+          "isolated prompt stall trace/statistics are wrong");
+
+  ContinuousBatchingEngine permanent(backend, kv_config(1, 4, 1, 2));
+  permanent.submit_request(Request({1}, 0, 3, 1));
+  require(permanent.run() == RunResult::Stalled && !permanent.failed() &&
+              permanent.plan_trace().size() == 1 &&
+              same_trace(prompt.plan_trace(), permanent.plan_trace()) &&
+              same_statistics(prompt.statistics(), permanent.statistics()),
+          "run() did not return a deterministic nonterminal stall");
+
+  ContinuousBatchingEngine decode(backend, kv_config(1, 2, 1, 2));
+  decode.submit_request(Request({1}, 0, 2, 1));
+  require(decode.run_next_iteration().made_progress(),
+          "boundary stall setup prefill failed");
+  const auto decode_before = snapshot(decode);
+  const IterationResult decode_result = decode.run_next_iteration();
+  require(decode_result.is_stalled() && !decode.failed() &&
+              decode.request({1}).generated_token_count == 0 &&
+              decode.clock().now_us() == decode_before.clock_us &&
+              decode.kv_cache().physical_blocks() ==
+                  decode_before.kv_cache.physical_blocks() &&
+              decode.kv_cache().block_tables() ==
+                  decode_before.kv_cache.block_tables(),
+          "isolated boundary decode stall mutated request or KV state");
+  decode.cancel_request({1});
+  require(decode.kv_cache().allocated_block_count() == 0 && !decode.failed(),
+          "cancellation after stall did not release resident blocks");
+  decode.submit_request(Request({2}, decode.clock().now_us(), 2, 0));
+  require(decode.run() == RunResult::Completed &&
+              decode.request({2}).state == RequestState::Finished,
+          "engine was not usable after cancelling a stalled decode");
+}
+
+void test_same_plan_completion_cannot_donate_blocks() {
+  const auto backend = batch_backend();
+  ContinuousBatchingEngine prefill(backend, kv_config(2, 4, 2, 2));
+  prefill.submit_request(Request({1}, 0, 2, 0));
+  prefill.submit_request(Request({2}, 0, 2, 1));
+  require(prefill.run_next_iteration().made_progress(),
+          "same-plan prefill fixture did not run");
+  const auto& first = prefill.plan_trace().back();
+  require(first.kv_block_tables.count({1}) == 0 &&
+              first.kv_block_tables.at({2}) ==
+                  std::vector<std::size_t>({1}) &&
+              first.free_kv_blocks == 1 &&
+              prefill.kv_cache().free_block_ids().count(0) == 1,
+          "zero-output prefill donated block 0 in the same plan");
+  require(prefill.run_next_iteration().made_progress(),
+          "following decode did not use released capacity");
+  require(prefill.request({2}).state == RequestState::Finished &&
+              prefill.kv_cache().allocated_block_count() == 0,
+          "following iteration did not consume/release eligible block 0");
+
+  ContinuousBatchingEngine decode(backend, kv_config(3, 5, 3, 2));
+  decode.submit_request(Request({1}, 0, 1, 1));
+  decode.submit_request(Request({2}, 0, 2, 4));
+  decode.submit_request(Request({3}, 0, 2, 2));
+  require(decode.run_next_iteration().made_progress(),
+          "same-plan decode fixture prefill failed");
+  decode.cancel_request({2});
+  require(decode.kv_cache().free_block_ids() == std::set<std::size_t>({1}),
+          "decode fixture did not expose block 1 at iteration start");
+  require(decode.run_next_iteration().made_progress(),
+          "same-plan decode iteration failed");
+  const auto& decode_trace = decode.plan_trace().back();
+  require(decode.request({1}).state == RequestState::Finished &&
+              decode.request({3}).state == RequestState::Decoding &&
+              decode_trace.kv_block_tables.at({3}) ==
+                  std::vector<std::size_t>({2, 1}) &&
+              decode.kv_cache().free_block_ids().count(0) == 1,
+          "completing decode donated block 0 to boundary decode");
+  decode.submit_request(Request({4}, decode.clock().now_us(), 1, 1));
+  require(decode.run_next_iteration().made_progress(),
+          "following plan did not run after decode release");
+  require(decode.plan_trace().back().plan.prefill_request_ids() ==
+              std::vector<RequestId>({RequestId{4}}) &&
+              decode.plan_trace().back().kv_block_tables.at({4}) ==
+                  std::vector<std::size_t>({0}),
+          "released lowest ID was not eligible in the following plan");
+}
+
+void test_kv_capacity_lifecycle_and_determinism() {
+  const auto backend = batch_backend();
+  ContinuousBatchingEngine engine(backend, kv_config(2, 8, 3, 2));
+  engine.submit_request(Request({1}, 0, 4, 2));
+  engine.submit_request(Request({2}, 0, 4, 1));
+  engine.run();
+
+  const auto& trace = engine.plan_trace();
+  require(trace.size() == 5, "KV capacity scenario trace length is wrong");
+  require_ids(trace[0].plan.prefill_request_ids(), {1},
+              "request A prompt was not admitted");
+  require(trace[0].plan.deferred_requests().size() == 1 &&
+              trace[0].plan.deferred_requests()[0].request_id == RequestId{2} &&
+              trace[0].plan.deferred_requests()[0].reason ==
+                  DeferralReason::KVCapacity &&
+              trace[0].allocated_kv_blocks == 2 &&
+              trace[0].represented_kv_tokens == 4,
+          "request B was not deferred for KV capacity");
+  require(trace[1].allocated_kv_blocks == 3 &&
+              trace[1].represented_kv_tokens == 5 &&
+              trace[1].internal_fragmentation_tokens == 1,
+          "decode boundary did not allocate exactly one block");
+  require(trace[2].allocated_kv_blocks == 0 &&
+              trace[2].free_kv_blocks == 3,
+          "completion did not release before the next plan");
+  require_ids(trace[3].plan.prefill_request_ids(), {2},
+              "deferred request was not admitted after release");
+  require(engine.request({1}).generated_token_count == 2 &&
+              engine.request({2}).generated_token_count == 1 &&
+              engine.kv_cache().allocated_block_count() == 0 &&
+              engine.statistics().current_allocated_kv_blocks == 0 &&
+              engine.statistics().peak_allocated_kv_blocks == 3 &&
+              engine.statistics().current_kv_block_utilization == 0.0 &&
+              engine.statistics().peak_kv_block_utilization == 1.0 &&
+              engine.statistics().represented_kv_tokens == 0 &&
+              engine.statistics().internal_fragmentation_tokens == 0 &&
+              engine.statistics().kv_capacity_deferral_count == 3 &&
+              engine.statistics().kv_allocation_failure_count == 0,
+          "KV lifecycle statistics are wrong");
+
+  ContinuousBatchingEngine repeat(backend, kv_config(2, 8, 3, 2));
+  repeat.submit_request(Request({1}, 0, 4, 2));
+  repeat.submit_request(Request({2}, 0, 4, 1));
+  repeat.run();
+  require(same_trace(engine.plan_trace(), repeat.plan_trace()),
+          "KV block behavior is not deterministic across runs");
+}
+
+void test_kv_planner_reservation_and_decode_deferral() {
+  const auto backend = batch_backend();
+  ContinuousBatchingEngine admission(backend, kv_config(3, 6, 2, 2));
+  admission.submit_request(Request({1}, 0, 2, 1));
+  admission.submit_request(Request({2}, 0, 2, 1));
+  admission.submit_request(Request({3}, 0, 2, 1));
+  require(admission.run_next_iteration(), "reservation plan did not run");
+  const auto& first = admission.plan_trace().front();
+  require_ids(first.plan.prefill_request_ids(), {1, 2},
+              "planner did not reserve two available blocks");
+  require(first.plan.deferred_requests().size() == 1 &&
+              first.plan.deferred_requests()[0].request_id == RequestId{3} &&
+              first.plan.deferred_requests()[0].reason ==
+                  DeferralReason::KVCapacity &&
+              first.allocated_kv_blocks == 2,
+          "planner overcommitted the unchanged free pool");
+
+  ContinuousBatchingEngine decode(backend, kv_config(2, 3, 2, 2));
+  decode.submit_request(Request({1}, 0, 2, 1));
+  decode.submit_request(Request({2}, 0, 1, 1));
+  require(decode.run_next_iteration(), "decode setup prefill did not run");
+  require(decode.kv_cache().allocated_block_count() == 2,
+          "decode setup residency is wrong");
+  require(decode.run_next_iteration(), "capacity-aware decode did not run");
+  const auto& second = decode.plan_trace().back();
+  require(second.plan.decode_request_ids() ==
+              std::vector<RequestId>({RequestId{2}}) &&
+              second.plan.deferred_requests().size() == 1 &&
+              second.plan.deferred_requests()[0].request_id == RequestId{1} &&
+              second.plan.deferred_requests()[0].reason ==
+                  DeferralReason::KVCapacity &&
+              decode.request({1}).generated_token_count == 0 &&
+              decode.request({2}).generated_token_count == 1,
+          "decode advanced without successful KV growth");
+  require(decode.run_next_iteration(),
+          "deferred boundary decode did not resume after release");
+  require(decode.request({1}).generated_token_count == 1 &&
+              decode.kv_cache().allocated_block_count() == 0,
+          "deferred boundary decode did not finish and release");
+}
+
+void test_kv_cancellation_and_zero_output_release() {
+  const auto backend = batch_backend();
+  ContinuousBatchingEngine engine(backend, kv_config(2, 4, 3, 2));
+  engine.submit_request(Request({1}, 0, 2, 3));
+  engine.submit_request(Request({2}, 10, 2, 1));
+  require(engine.run_next_iteration(), "active cancellation setup failed");
+  require(engine.kv_cache().allocated_block_count() == 1,
+          "active prompt KV was not resident");
+  engine.cancel_request({2});
+  require(engine.kv_cache().allocated_block_count() == 1,
+          "waiting cancellation changed KV occupancy");
+  engine.cancel_request({1});
+  require(engine.kv_cache().allocated_block_count() == 0 &&
+              engine.statistics().cancelled_request_count == 2,
+          "active cancellation did not release KV");
+
+  ContinuousBatchingEngine zero(backend, kv_config(1, 2, 1, 2));
+  zero.submit_request(Request({9}, 0, 2, 0));
+  zero.run();
+  require(zero.request({9}).state == RequestState::Finished &&
+              zero.kv_cache().allocated_block_count() == 0 &&
+              zero.statistics().peak_allocated_kv_blocks == 1 &&
+              zero.plan_trace().front().allocated_kv_blocks == 0,
+          "zero-output prompt was not allocated then released atomically");
 }
 
 void test_simulated_throughput_comparison() {
@@ -996,6 +1334,15 @@ int main() {
       {"determinism and overflow", test_determinism_and_checked_overflow},
       {"two-phase failure guarantee",
        test_iteration_two_phase_failure_guarantee},
+      {"deferred-only KV stalls", test_deferred_only_kv_stalls_are_nonterminal},
+      {"same-plan completion KV ordering",
+       test_same_plan_completion_cannot_donate_blocks},
+      {"KV capacity lifecycle and determinism",
+       test_kv_capacity_lifecycle_and_determinism},
+      {"KV planner reservation and decode deferral",
+       test_kv_planner_reservation_and_decode_deferral},
+      {"KV cancellation and zero-output release",
+       test_kv_cancellation_and_zero_output_release},
       {"SIMULATED educational cost-model comparison",
        test_simulated_throughput_comparison},
   };

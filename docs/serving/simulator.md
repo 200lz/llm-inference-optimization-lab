@@ -113,7 +113,7 @@ unrepresentable signed 64-bit results throw `std::overflow_error`.
   epoch's deterministic FCFS head; stale or non-head commits are rejected before
   mutation.
 
-There are no threads, wall-clock timing, continuous batching, KV-cache blocks,
+For this S1/S2 engine there are no threads, wall-clock timing, continuous batching, KV-cache blocks,
 prefix caching, preemption, JSON/HTTP, real model execution, llama.cpp adapter,
 or hardware measurements. These analytical costs drive a discrete-event
 simulation and must not be presented as measured performance.

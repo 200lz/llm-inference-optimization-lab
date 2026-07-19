@@ -49,11 +49,16 @@ Implementation follows the repository's C++17, GCC/Ninja/CMake-preset convention
 
 ### S4 — block KV cache
 
-- Add fixed-size block allocation, partial-tail accounting, deterministic
-  release, capacity invariants, cache-aware iteration snapshots, and recompute
-  preemption only after the non-preemptive reference is stable.
-- Gate: tests cover exhaustion, fragmentation, finish/cancel cleanup,
-  deterministic victims, and capacity conservation.
+- Add metadata-only fixed-size block allocation, partial-tail accounting,
+  deterministic lowest-ID release/reuse, capacity invariants, cache-aware
+  planning snapshots, `KVCapacity` deferral, and KV diagnostics. Keep the S4
+  reference non-preemptive; blocked work waits for ordinary completion or
+  cancellation to release capacity. A fully KV-deferred boundary returns an
+  explicit nonterminal stalled result, and same-plan completions cannot donate
+  blocks until the following iteration.
+- Gate: tests cover exhaustion, fragmentation, prompt/decode growth,
+  finish/cancel cleanup, fixed-seed invariant sequences, transactional failure,
+  deterministic IDs, planner reservation, and capacity conservation.
 
 ### S5 — prefix cache
 
@@ -119,7 +124,8 @@ A result is publishable only when its workload is non-fabricated or explicitly l
 ## Questions to resolve before the relevant phase
 
 1. S1: choose the public trace time unit and whether prompt content is inline token IDs or referenced from a companion file.
-2. S4: choose the default block size and recompute-preemption threshold.
+2. S4: resolved with a 16-token API default and explicit test values;
+   preemption is deferred beyond S4.
 3. S5: choose the prefix key/hash after measuring the memory-versus-collision-check tradeoff.
 4. S7: choose the cost-model family only after inspecting the available llama.cpp measurements; do not assume linear scaling.
 5. S8: decide which pinned llama.cpp APIs are sufficiently stable for an adapter and whether adapter work belongs in the default build.

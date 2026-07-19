@@ -1,4 +1,4 @@
-# Phase S3 deterministic continuous batching
+# Phase S3/S4 deterministic continuous batching
 
 ## Scope and architecture
 
@@ -20,15 +20,16 @@ deterministically by one thread of control; it is not concurrent execution.
 ## Configuration and admission
 
 `ContinuousBatchingConfig` contains `max_num_sequences` (default 8),
-`max_batched_tokens` (default 512), and strongly typed `SchedulingPolicy`
+`max_batched_tokens` (default 512), a strongly typed `SchedulingPolicy`, and an
+S4 `KVCacheConfig`
 (`DecodeFirst` or `FcfsMixed`). Both budgets must be at least one. Tests and
 examples pass explicit values.
 
 `max_num_sequences` limits work scheduled in one iteration. It is not a limit
 on all resident `Decoding` requests and is not a KV-cache residency limit.
 Active decodes that are deferred remain in `Decoding` and are reconsidered in
-later iterations. Phase S4 introduces independent KV-block capacity and
-residency constraints.
+later iterations. S4's independent `total_num_blocks` is the resident KV limit;
+it is not a per-iteration work limit.
 
 Each prefill consumes its complete `prompt_token_count`; each decode consumes
 one token unit. Chunked prefill is not implemented. Submission therefore
@@ -51,6 +52,14 @@ One `run_next_iteration()` call performs this deterministic boundary:
 8. assign lifecycle timestamps at the iteration start or end;
 9. advance the checked integer simulation clock;
 10. repeat until no runnable or future work remains.
+
+The return value distinguishes `Progressed`, `Stalled`, and `Complete`.
+`Stalled` is a successful zero-time planner iteration in which every runnable
+candidate is deferred for `KVCapacity`; it calls no backend and mutates no
+request or KV state. The trace and deferral statistics are still committed.
+The caller may then cancel a resident request. `run()` returns `Completed` for
+a drained workload or `Stalled` at the first deterministic no-progress KV
+boundary, so it cannot spin. Neither stall result marks the engine failed.
 
 An arrival strictly inside a batch becomes eligible at the next boundary and
 never executes before `arrival_time_us`. When only future arrivals remain, the
@@ -90,7 +99,10 @@ Factories defensively reject invalid enum values.
 Deferral reason precedence is deterministic. `TokenBudget` is used whenever a
 candidate exceeds the remaining token budget, including when both budgets are
 exhausted. `SequenceBudget` is used only when the candidate still fits the
-token budget but no per-iteration sequence slot remains.
+token budget but no per-iteration sequence slot remains. `KVCapacity` is used
+only when both iteration budgets fit but the prompt or decode-boundary block
+reservation does not. The planner subtracts reservations from a local free
+count and never mutates or overcommits the live manager.
 
 ## Policies
 
@@ -188,13 +200,20 @@ Both paths finish two requests and generate four output tokens. This is a
 **SIMULATED educational cost-model comparison**, not hardware speedup and not a
 claim that continuous batching universally improves latency or throughput.
 
-## Limitations and Phase S4 handoff
+## S4 KV integration and limitations
 
-S3 has no threads or true parallel execution, real GPU/MN-Core timing, KV
-memory pressure, block allocation, prefix reuse, preemption, HTTP/JSON,
-llama.cpp integration, model execution, or vLLM/SGLang feature parity. It uses
-whole-prompt prefill; chunking and cancellation inside a batch are deferred.
+S4 allocates each complete prompt before prefill and appends KV before a decode
+token is committed. Completion and active cancellation release private blocks;
+zero-output requests allocate then release inside their prefill transaction.
+All allocations/appends in a plan occur before any same-plan completion release,
+so released blocks become eligible only in the following iteration.
+Iteration preparation applies these operations to a copied metadata manager and
+commits it by swap. Trace rows contain post-iteration occupancy and read-only
+block tables. See [block KV-cache metadata](kv_cache.md).
 
-Phase S4 adds block-based KV management: fixed-size allocation, partial-tail
-accounting, deterministic release, capacity pressure, and snapshot information
-needed for later recompute preemption. Prefix reuse remains subsequent work.
+There are still no threads, true parallel execution, real K/V tensors,
+byte-level sizing, GPU/MN-Core timing, prefix sharing, eviction, swapping,
+preemption, HTTP/JSON, llama.cpp integration, model execution, or vLLM
+PagedAttention feature-parity claim. Whole-prompt prefill remains mandatory.
+`Preempted` remains a reserved future lifecycle state and is never entered by
+S4; KV pressure produces only `KVCapacity` deferral or a nonterminal stall.

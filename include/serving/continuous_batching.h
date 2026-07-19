@@ -1,5 +1,6 @@
 #pragma once
 
+#include "serving/kv_cache.h"
 #include "serving/request.h"
 #include "serving/simulated_backend.h"
 #include "serving/simulation_clock.h"
@@ -26,7 +27,8 @@ class ContinuousBatchingConfig {
   explicit ContinuousBatchingConfig(
       std::size_t max_num_sequences = 8,
       std::uint64_t max_batched_tokens = 512,
-      SchedulingPolicy scheduling_policy = SchedulingPolicy::DecodeFirst);
+      SchedulingPolicy scheduling_policy = SchedulingPolicy::DecodeFirst,
+      KVCacheConfig kv_cache_config = KVCacheConfig(1024, 16));
 
   std::size_t max_num_sequences() const noexcept { return max_num_sequences_; }
   std::uint64_t max_batched_tokens() const noexcept {
@@ -35,15 +37,52 @@ class ContinuousBatchingConfig {
   SchedulingPolicy scheduling_policy() const noexcept {
     return scheduling_policy_;
   }
+  const KVCacheConfig& kv_cache_config() const noexcept {
+    return kv_cache_config_;
+  }
 
  private:
   std::size_t max_num_sequences_;
   std::uint64_t max_batched_tokens_;
   SchedulingPolicy scheduling_policy_;
+  KVCacheConfig kv_cache_config_;
 };
 
-enum class DeferralReason { SequenceBudget, TokenBudget };
+enum class DeferralReason { SequenceBudget, TokenBudget, KVCapacity };
 std::string_view to_string(DeferralReason reason) noexcept;
+
+enum class IterationOutcome { Progressed, Stalled, Complete };
+
+class IterationResult {
+ public:
+  static IterationResult progressed() noexcept {
+    return IterationResult(IterationOutcome::Progressed);
+  }
+  static IterationResult stalled() noexcept {
+    return IterationResult(IterationOutcome::Stalled);
+  }
+  static IterationResult complete() noexcept {
+    return IterationResult(IterationOutcome::Complete);
+  }
+
+  IterationOutcome outcome() const noexcept { return outcome_; }
+  bool made_progress() const noexcept {
+    return outcome_ == IterationOutcome::Progressed;
+  }
+  bool is_stalled() const noexcept {
+    return outcome_ == IterationOutcome::Stalled;
+  }
+  operator bool() const noexcept {
+    return outcome_ != IterationOutcome::Complete;
+  }
+
+ private:
+  explicit IterationResult(IterationOutcome outcome) noexcept
+      : outcome_(outcome) {}
+  IterationOutcome outcome_;
+};
+
+enum class RunResult { Completed, Stalled };
 
 struct DeferredRequest {
   RequestId request_id;
@@ -88,7 +127,12 @@ class BatchPlan {
   std::size_t scheduled_sequence_count() const noexcept {
     return prefill_request_ids_.size() + decode_request_ids_.size();
   }
-  bool empty() const noexcept { return scheduled_sequence_count() == 0; }
+  bool empty() const noexcept {
+    return scheduled_sequence_count() == 0 && deferred_requests_.empty();
+  }
+  bool deferred_only() const noexcept {
+    return scheduled_sequence_count() == 0 && !deferred_requests_.empty();
+  }
 
  private:
   static BatchPlan create_with_deferred(
@@ -124,12 +168,19 @@ struct BatchTraceEntry {
   std::int64_t end_timestamp_us;
   SchedulingPolicy policy;
   BatchPlan plan;
+  std::size_t allocated_kv_blocks;
+  std::size_t free_kv_blocks;
+  std::uint64_t represented_kv_tokens;
+  std::uint64_t internal_fragmentation_tokens;
+  double kv_block_utilization;
+  std::map<RequestId, std::vector<std::size_t>> kv_block_tables;
 };
 
 struct ContinuousBatchingStatistics {
   std::uint64_t scheduling_iteration_count{0};
   std::uint64_t nonempty_batch_count{0};
   std::uint64_t idle_iteration_count{0};
+  std::uint64_t stalled_iteration_count{0};
   std::uint64_t total_prefill_tokens_scheduled{0};
   std::uint64_t total_decode_tokens_scheduled{0};
   std::uint64_t total_scheduled_sequences{0};
@@ -138,6 +189,15 @@ struct ContinuousBatchingStatistics {
   std::uint64_t deferred_request_count{0};
   std::uint64_t completed_request_count{0};
   std::uint64_t cancelled_request_count{0};
+  std::size_t current_allocated_kv_blocks{0};
+  std::size_t peak_allocated_kv_blocks{0};
+  double current_kv_block_utilization{0.0};
+  double peak_kv_block_utilization{0.0};
+  std::uint64_t represented_kv_tokens{0};
+  std::uint64_t internal_fragmentation_tokens{0};
+  std::uint64_t kv_allocation_failure_count{0};
+  // Counts one occurrence per request deferred for KV capacity per iteration.
+  std::uint64_t kv_capacity_deferral_count{0};
 
   // Undefined when nonempty_batch_count is zero.
   std::optional<double> average_batch_size() const noexcept;
@@ -153,14 +213,15 @@ class ContinuousBatchingEngine {
 
   void submit_request(Request request);
   void cancel_request(RequestId request_id);
-  bool run_next_iteration();
-  void run();
+  IterationResult run_next_iteration();
+  RunResult run();
 
   const Request& request(RequestId request_id) const;
   const std::map<RequestId, Request>& requests() const;
   const std::vector<BatchTraceEntry>& plan_trace() const;
   const ContinuousBatchingStatistics& statistics() const;
   const SimulationClock& clock() const;
+  const KVCacheManager& kv_cache() const;
   bool failed() const noexcept { return failed_; }
 
  private:
@@ -169,6 +230,7 @@ class ContinuousBatchingEngine {
     std::int64_t arrival_time_us;
     bool is_prefill;
     std::uint64_t token_cost;
+    std::size_t kv_blocks_required;
   };
 
   struct PreparedRequestUpdate {
@@ -183,6 +245,7 @@ class ContinuousBatchingEngine {
     BatchTraceEntry trace_entry;
     std::uint64_t next_iteration_number;
     SimulationClock clock;
+    KVCacheManager kv_cache;
   };
 
   std::set<RequestId> arrivals_at_current_timestamp() const;
@@ -203,10 +266,11 @@ class ContinuousBatchingEngine {
       const std::set<RequestId>& arrived_requests,
       std::uint64_t& completed_request_count);
   ContinuousBatchingStatistics prepare_statistics(
-      const BatchPlan& plan, std::uint64_t completed_request_count) const;
+      const BatchPlan& plan, std::uint64_t completed_request_count,
+      const KVCacheManager& prepared_kv_cache) const;
   PreparedIteration prepare_iteration(
       BatchPlan plan, std::set<RequestId> arrived_requests,
-      std::int64_t end_timestamp_us);
+      std::int64_t time_value_us, bool time_value_is_duration);
   void commit_iteration(PreparedIteration prepared) noexcept;
   std::optional<std::int64_t> next_future_arrival(
       const std::set<RequestId>& arrived_requests) const;
@@ -221,6 +285,7 @@ class ContinuousBatchingEngine {
   std::set<RequestId> arrived_requests_;
   std::vector<BatchTraceEntry> plan_trace_;
   ContinuousBatchingStatistics statistics_;
+  KVCacheManager kv_cache_;
   std::uint64_t next_iteration_number_{1};
   bool failed_{false};
   bool fail_trace_preparation_for_test_{false};
