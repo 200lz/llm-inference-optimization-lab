@@ -13,7 +13,8 @@ from benchmarks.run_serving_simulation import run, runner_command
 from benchmarks.run_serving_matrix import validate_matrix
 from benchmarks.serving_common import (MANIFEST_SCHEMA_VERSION, ROOT, ValidationError,
     WORKLOAD_SCHEMA_VERSION, canonical_json, load_json, read_jsonl, read_workload, sha256_file,
-    validate_native_records, validate_output_destination, validate_serving_config)
+    validate_benchmark_runner, validate_benchmark_runner_consistency, validate_native_records,
+    validate_output_destination, validate_serving_config)
 
 
 RUNNER = ROOT / "build/debug/serving-benchmark-runner"
@@ -33,6 +34,7 @@ def test_machine_runner_is_deterministic_and_provenance_complete(tmp_path: Path)
                   "simulator_schema_version", "commands"):
         assert field in provenance and provenance[field] is not None
     assert all(record.get("evidence_type") in {"simulated", "SIMULATED"} for record in first_records)
+    assert provenance["benchmark_runner"]["sha256"] == sha256_file(RUNNER)
     summary, _ = analyze(first)
     assert summary["completed"] == 8
 
@@ -404,6 +406,13 @@ def test_checked_in_results_are_portable_and_schema_valid() -> None:
     run_items = {item["result"]: item for manifest in manifests for item in manifest["runs"]}
     assert set(run_items) == {path.relative_to(ROOT).as_posix()
                               for path in (result_root / "raw").glob("*.jsonl")}
+    runner_provenance = []
+    for name, manifest in zip(("command_manifest.json", "extended_command_manifest.json"), manifests):
+        if "benchmark_runner" in manifest:
+            runner_provenance.append((name, manifest["benchmark_runner"]))
+        for index, item in enumerate(manifest["runs"]):
+            if "benchmark_runner" in item:
+                runner_provenance.append((f"{name} run {index}", item["benchmark_runner"]))
     for item in run_items.values():
         result = ROOT / item["result"]
         assert result.is_file(), result
@@ -411,8 +420,39 @@ def test_checked_in_results_are_portable_and_schema_valid() -> None:
         assert summary["submitted"] == len([row for row in read_jsonl(result)
                                             if row.get("record_type") == "request"])
         assert provenance["dirty_worktree"] is True
-        assert provenance["benchmark_runner"]["sha256"] == sha256_file(
-            ROOT / provenance["benchmark_runner"]["path"])
+        runner_provenance.append((item["result"], provenance["benchmark_runner"]))
         workload = ROOT / provenance["normalized_config"]["workload"]["path"]
         assert provenance["workload_sha256"] == sha256_file(workload)
         assert provenance["workload_manifest"]["workload_sha256"] == provenance["workload_sha256"]
+    validate_benchmark_runner_consistency(runner_provenance)
+
+
+def test_recorded_runner_provenance_is_portable_without_local_binary() -> None:
+    value = {"path": "build/missing/serving-benchmark-runner", "sha256": "a" * 64}
+    assert not (ROOT / value["path"]).exists()
+    assert validate_benchmark_runner(value, context="reference") == (value["path"], value["sha256"])
+
+
+@pytest.mark.parametrize("path", ["/opt/serving-benchmark-runner", "../serving-benchmark-runner"])
+def test_recorded_runner_path_rejects_nonportable_values(path: str) -> None:
+    with pytest.raises(ValidationError, match="normalized repository-relative"):
+        validate_benchmark_runner({"path": path, "sha256": "a" * 64}, context="reference")
+
+
+@pytest.mark.parametrize("digest", ["a" * 63, "A" * 64, "g" * 64])
+def test_recorded_runner_sha_rejects_malformed_values(digest: str) -> None:
+    with pytest.raises(ValidationError, match="lowercase SHA-256"):
+        validate_benchmark_runner(
+            {"path": "build/debug/serving-benchmark-runner", "sha256": digest},
+            context="reference")
+
+
+@pytest.mark.parametrize("changed", [
+    {"path": "build/release/serving-benchmark-runner", "sha256": "a" * 64},
+    {"path": "build/debug/serving-benchmark-runner", "sha256": "b" * 64},
+])
+def test_recorded_runner_provenance_must_be_consistent(changed: dict[str, str]) -> None:
+    original = {"path": "build/debug/serving-benchmark-runner", "sha256": "a" * 64}
+    with pytest.raises(ValidationError, match="disagrees"):
+        validate_benchmark_runner_consistency([
+            ("raw reference", original), ("command_manifest.json", changed)])

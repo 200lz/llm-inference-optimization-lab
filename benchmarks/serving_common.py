@@ -11,7 +11,7 @@ import re
 import subprocess
 import sys
 import tempfile
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Iterable
 
 
@@ -107,6 +107,38 @@ def sha256_file(path: Path) -> str:
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def validate_benchmark_runner(value: Any, *, context: str) -> tuple[str, str]:
+    """Validate portable, recorded runner provenance without requiring the binary."""
+    if not isinstance(value, dict) or set(value) != {"path", "sha256"}:
+        raise ValidationError(f"{context}: benchmark_runner must be an object containing path and sha256")
+    path, digest = value["path"], value["sha256"]
+    if not isinstance(path, str) or not path:
+        raise ValidationError(f"{context}: benchmark_runner.path must be a nonempty string")
+    parsed = PurePosixPath(path)
+    if (parsed.is_absolute() or re.match(r"^[A-Za-z]:[\\/]", path) or "\\" in path or
+            parsed.as_posix() != path or any(part == ".." for part in parsed.parts)):
+        raise ValidationError(
+            f"{context}: benchmark_runner.path must be a normalized repository-relative path")
+    if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+        raise ValidationError(f"{context}: benchmark_runner.sha256 must be a lowercase SHA-256")
+    return path, digest
+
+
+def validate_benchmark_runner_consistency(
+        values: Iterable[tuple[str, Any]]) -> tuple[str, str]:
+    """Require one portable runner provenance pair across reference artifacts."""
+    expected: tuple[str, str] | None = None
+    for context, value in values:
+        actual = validate_benchmark_runner(value, context=context)
+        if expected is None:
+            expected = actual
+        elif actual != expected:
+            raise ValidationError(f"{context}: benchmark_runner disagrees with checked-in references")
+    if expected is None:
+        raise ValidationError("checked-in references do not record benchmark_runner provenance")
+    return expected
 
 
 def load_json(path: Path) -> dict[str, Any]:
@@ -597,12 +629,7 @@ def validate_run_record(record: dict[str, Any], *, line_number: int = 1) -> None
         raise ValidationError(f"{context}: workload manifest generated request count mismatch")
     if record["seed"] != manifest["seed"] or record["seed"] != record["normalized_config"]["run_seed"]:
         raise ValidationError(f"{context}: run/config/workload seed mismatch")
-    runner = record["benchmark_runner"]
-    if not isinstance(runner, dict) or set(runner) != {"path", "sha256"} or not all(
-            isinstance(runner[name], str) and runner[name] for name in runner):
-        raise ValidationError(f"{context}: benchmark_runner must contain path and sha256 strings")
-    if re.fullmatch(r"[0-9a-f]{64}", runner["sha256"]) is None:
-        raise ValidationError(f"{context}: benchmark_runner.sha256 must be a lowercase SHA-256")
+    validate_benchmark_runner(record["benchmark_runner"], context=context)
     commands = record["commands"]
     if not isinstance(commands, list) or not commands or any(
             not isinstance(command, list) or not command or any(not isinstance(arg, str) for arg in command)
