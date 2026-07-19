@@ -2,7 +2,7 @@
 
 Reproducible llama.cpp CPU profiling, hot-path optimization,
 and deterministic LLM serving-engine simulation
-**Quantization, KV Cache, CPU Profiling, and Hot-Path Optimization**
+
 
 ## Overview
 
