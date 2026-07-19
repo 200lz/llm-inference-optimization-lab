@@ -17,6 +17,7 @@ target_compile_options(native_smoke PRIVATE
 )
 
 add_library(llm_lab_serving
+  src/serving/fcfs_scheduler.cpp
   src/serving/request.cpp
   src/serving/simulated_backend.cpp
   src/serving/simulation_engine.cpp
@@ -74,8 +75,15 @@ if(BUILD_TESTING)
     $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic>
   )
 
+  add_executable(serving_scheduler_tests tests/serving/test_scheduler.cpp)
+  target_link_libraries(serving_scheduler_tests PRIVATE llm_lab_serving)
+  target_compile_options(serving_scheduler_tests PRIVATE
+    $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic>
+  )
+
   add_test(NAME native_smoke COMMAND native_smoke)
   add_test(NAME serving_simulator COMMAND serving_tests)
+  add_test(NAME serving_scheduler COMMAND serving_scheduler_tests)
   add_test(NAME kernel_q4_hotpath_correctness COMMAND kernel_q4_hotpath_test)
   add_test(NAME q8_rn2_scale_correctness COMMAND q8_rn2_scale_test)
 endif()

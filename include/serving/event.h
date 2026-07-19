@@ -26,15 +26,18 @@ struct Event {
 
 class EventQueue {
  public:
-  void schedule(std::int64_t timestamp_us, RequestId request_id,
-                EventType type) {
+  std::uint64_t schedule(std::int64_t timestamp_us, RequestId request_id,
+                         EventType type) {
     if (timestamp_us < 0) {
       throw std::invalid_argument("event timestamp must be non-negative");
     }
     if (next_sequence_ == std::numeric_limits<std::uint64_t>::max()) {
       throw std::overflow_error("event sequence overflow");
     }
-    events_.push(Event{timestamp_us, next_sequence_++, request_id, type});
+    const std::uint64_t event_sequence = next_sequence_;
+    events_.push(Event{timestamp_us, event_sequence, request_id, type});
+    ++next_sequence_;
+    return event_sequence;
   }
 
   Event pop() {
@@ -44,6 +47,13 @@ class EventQueue {
     const Event event = events_.top();
     events_.pop();
     return event;
+  }
+
+  const Event& top() const {
+    if (events_.empty()) {
+      throw std::logic_error("cannot inspect an empty event queue");
+    }
+    return events_.top();
   }
 
   bool empty() const noexcept { return events_.empty(); }

@@ -25,7 +25,7 @@ enum class RequestState {
   Prefilling,
   Decoding,
   Finished,
-  // Reserved in Phase S1; SimulationEngine does not initiate these states.
+  // Preempted remains reserved; Phase S2 implements explicit cancellation.
   Preempted,
   Cancelled,
 };

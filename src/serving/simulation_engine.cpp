@@ -1,13 +1,22 @@
 #include "serving/simulation_engine.h"
 
 #include "serving/checked_math.h"
+#include "serving/fcfs_scheduler.h"
 
+#include <limits>
 #include <stdexcept>
 #include <utility>
 
 namespace llm_lab::serving {
 
-SimulationEngine::SimulationEngine(const Backend& backend) : backend_(backend) {
+SimulationEngine::SimulationEngine(const Backend& backend,
+                                   SimulationEngineConfig config)
+    : backend_(backend),
+      scheduler_(std::make_unique<FcfsScheduler>(config.max_active_requests)) {
+  if (config.max_active_requests != 1) {
+    throw std::invalid_argument(
+        "Phase S2 supports exactly one active request");
+  }
   backend_.validate_configuration();
 }
 
@@ -33,9 +42,95 @@ void SimulationEngine::submit_request(Request request) {
     throw std::invalid_argument("duplicate request ID");
   }
   try {
-    events_.schedule(arrival_time_us, id, EventType::RequestArrival);
+    schedule_request_event(arrival_time_us, id, EventType::RequestArrival);
   } catch (...) {
     requests_.erase(id);
+    throw;
+  }
+}
+
+void SimulationEngine::cancel_request(RequestId request_id) {
+  if (failed_) {
+    throw std::logic_error("cannot cancel in a failed simulation engine");
+  }
+  const auto found = requests_.find(request_id);
+  if (found == requests_.end()) {
+    throw std::out_of_range("unknown request ID");
+  }
+  Request& request = found->second;
+  if (request.state == RequestState::Finished ||
+      request.state == RequestState::Cancelled) {
+    throw std::logic_error("terminal request cannot be cancelled");
+  }
+  if (request.state == RequestState::Preempted) {
+    throw std::logic_error("preempted requests are not implemented");
+  }
+
+  try {
+    const auto pending = pending_events_.find(request_id);
+    if (request.state == RequestState::Waiting) {
+      if (pending != pending_events_.end() &&
+          pending->second.type != EventType::RequestArrival) {
+        throw std::logic_error("waiting request has unexpected pending event");
+      }
+    } else if (request.state == RequestState::Prefilling) {
+      if (pending == pending_events_.end() ||
+          (pending->second.type != EventType::PrefillComplete &&
+           pending->second.type != EventType::RequestComplete)) {
+        throw std::logic_error("prefilling request has no valid pending event");
+      }
+    } else if (request.state == RequestState::Decoding) {
+      if (pending == pending_events_.end() ||
+          (pending->second.type != EventType::DecodeStepComplete &&
+           pending->second.type != EventType::RequestComplete)) {
+        throw std::logic_error("decoding request has no valid pending event");
+      }
+    }
+
+    scheduler_->notify_cancelled(request_id, clock_.now_us());
+    request.transition_to(RequestState::Cancelled);
+    request.finish_time_us = clock_.now_us();
+    if (pending != pending_events_.end()) {
+      pending->second.authorized_cancelled_ignore = true;
+    }
+    if (active_request_id_.has_value() &&
+        *active_request_id_ == request_id) {
+      active_request_id_.reset();
+    }
+    if (events_.empty() ||
+        events_.top().timestamp_us != clock_.now_us()) {
+      start_next_if_idle();
+    }
+  } catch (...) {
+    failed_ = true;
+    throw;
+  }
+}
+
+bool SimulationEngine::run_next_timestamp() {
+  if (failed_) {
+    throw std::logic_error("cannot run a failed simulation engine");
+  }
+  if (events_.empty()) {
+    return false;
+  }
+  try {
+    const std::int64_t timestamp_us = events_.top().timestamp_us;
+    clock_.advance_to(timestamp_us);
+    std::vector<Event> processed_at_timestamp;
+    do {
+      const Event event = events_.pop();
+      if (process_event(event)) {
+        processed_at_timestamp.push_back(event);
+      }
+    } while (!events_.empty() &&
+             events_.top().timestamp_us == timestamp_us);
+    start_next_if_idle();
+    event_log_.insert(event_log_.end(), processed_at_timestamp.begin(),
+                      processed_at_timestamp.end());
+    return true;
+  } catch (...) {
+    failed_ = true;
     throw;
   }
 }
@@ -44,20 +139,12 @@ void SimulationEngine::run() {
   if (failed_) {
     throw std::logic_error("cannot run a failed simulation engine");
   }
-  try {
-    while (!events_.empty()) {
-      const Event event = events_.pop();
-      clock_.advance_to(event.timestamp_us);
-      process_event(event);
-      start_next_if_idle();
-      event_log_.push_back(event);
-    }
-    if (active_request_id_.has_value() || !waiting_.empty()) {
-      throw std::logic_error("simulation drained with unfinished work");
-    }
-  } catch (...) {
+  while (run_next_timestamp()) {
+  }
+  if (active_request_id_.has_value() || !scheduler_->empty() ||
+      !pending_events_.empty()) {
     failed_ = true;
-    throw;
+    throw std::logic_error("simulation drained with unfinished work");
   }
 }
 
@@ -85,6 +172,21 @@ const SimulationClock& SimulationEngine::clock() const {
   return clock_;
 }
 
+const SchedulerStatistics& SimulationEngine::scheduler_statistics() const {
+  require_results_available();
+  return scheduler_->statistics();
+}
+
+std::size_t SimulationEngine::scheduler_waiting_count() const {
+  require_results_available();
+  return scheduler_->waiting_count();
+}
+
+std::size_t SimulationEngine::scheduler_running_count() const {
+  require_results_available();
+  return scheduler_->running_count();
+}
+
 void SimulationEngine::require_results_available() const {
   if (failed_) {
     throw std::logic_error("simulation results are unavailable after failure");
@@ -104,42 +206,101 @@ void SimulationEngine::schedule_after(std::int64_t cost_us,
   if (cost_us < 0) {
     throw std::logic_error("backend returned a negative cost");
   }
-  events_.schedule(checked_add(clock_.now_us(), cost_us), request_id, type);
+  schedule_request_event(checked_add(clock_.now_us(), cost_us), request_id,
+                         type);
+}
+
+void SimulationEngine::schedule_request_event(std::int64_t timestamp_us,
+                                              RequestId request_id,
+                                              EventType type) {
+  const auto inserted = pending_events_.emplace(
+      request_id, PendingEvent{0, type, false});
+  if (!inserted.second) {
+    throw std::logic_error("request already has a pending event");
+  }
+  try {
+    inserted.first->second.event_sequence =
+        events_.schedule(timestamp_us, request_id, type);
+  } catch (...) {
+    pending_events_.erase(inserted.first);
+    throw;
+  }
 }
 
 void SimulationEngine::start_next_if_idle() {
-  if (active_request_id_.has_value() || waiting_.empty()) {
+  if (active_request_id_.has_value()) {
     return;
   }
 
-  const RequestId id = waiting_.front();
+  const SchedulerDecision decision = scheduler_->choose_next_request();
+  if (decision.kind() == SchedulerDecisionKind::NoWork) {
+    if (decision.request_id().has_value()) {
+      throw std::logic_error("NoWork decision contains a request ID");
+    }
+    return;
+  }
+  if (decision.kind() == SchedulerDecisionKind::CapacityFull) {
+    if (decision.request_id().has_value()) {
+      throw std::logic_error("CapacityFull decision contains a request ID");
+    }
+    throw std::logic_error("scheduler reports capacity with no active request");
+  }
+  if (decision.kind() != SchedulerDecisionKind::Admit) {
+    throw std::logic_error("scheduler returned an unknown decision kind");
+  }
+  const std::optional<RequestId> decision_request_id = decision.request_id();
+  if (!decision_request_id.has_value()) {
+    throw std::logic_error("scheduler admission decision has no request ID");
+  }
+
+  const RequestId id = *decision_request_id;
   Request& next = mutable_request(id);
   if (next.state != RequestState::Waiting ||
       next.arrival_time_us > clock_.now_us()) {
-    throw std::logic_error("invalid request in FIFO waiting queue");
+    throw std::logic_error("scheduler selected an invalid waiting request");
   }
 
   const std::int64_t prefill_cost =
       backend_.estimate_prefill_us(next.prompt_token_count, 1);
   schedule_after(prefill_cost, id, EventType::PrefillComplete);
 
-  waiting_.pop_front();
+  scheduler_->notify_admitted(decision, clock_.now_us());
   next.transition_to(RequestState::Prefilling);
   next.admitted_time_us = clock_.now_us();
   next.first_scheduled_time_us = clock_.now_us();
   active_request_id_ = id;
 }
 
-void SimulationEngine::process_event(const Event& event) {
+bool SimulationEngine::process_event(const Event& event) {
   Request& current = mutable_request(event.request_id);
+  const auto pending = pending_events_.find(event.request_id);
+  if (pending == pending_events_.end() ||
+      pending->second.event_sequence != event.event_sequence ||
+      pending->second.type != event.type) {
+    throw std::logic_error("event does not match the request's pending event");
+  }
+  if (pending->second.authorized_cancelled_ignore) {
+    if (current.state != RequestState::Cancelled) {
+      throw std::logic_error("cancelled-event authorization on active request");
+    }
+    if (ignored_cancelled_event_count_ ==
+        std::numeric_limits<std::uint64_t>::max()) {
+      throw std::overflow_error("ignored cancelled event count overflow");
+    }
+    pending_events_.erase(pending);
+    ++ignored_cancelled_event_count_;
+    return false;
+  }
+  pending_events_.erase(pending);
+
   switch (event.type) {
     case EventType::RequestArrival:
       if (current.state != RequestState::Waiting ||
           current.admitted_time_us.has_value()) {
         throw std::logic_error("duplicate or stale arrival event");
       }
-      waiting_.push_back(event.request_id);
-      return;
+      scheduler_->notify_arrival(event.request_id, current.arrival_time_us);
+      return true;
 
     case EventType::PrefillComplete:
       if (!active_request_id_.has_value() ||
@@ -155,7 +316,7 @@ void SimulationEngine::process_event(const Event& event) {
                        EventType::DecodeStepComplete);
         current.transition_to(RequestState::Decoding);
       }
-      return;
+      return true;
 
     case EventType::DecodeStepComplete: {
       if (!active_request_id_.has_value() ||
@@ -177,7 +338,7 @@ void SimulationEngine::process_event(const Event& event) {
       if (!current.first_token_time_us.has_value()) {
         current.first_token_time_us = clock_.now_us();
       }
-      return;
+      return true;
     }
 
     case EventType::RequestComplete:
@@ -190,9 +351,11 @@ void SimulationEngine::process_event(const Event& event) {
       }
       current.transition_to(RequestState::Finished);
       current.finish_time_us = clock_.now_us();
+      scheduler_->notify_completed(event.request_id, clock_.now_us());
       active_request_id_.reset();
-      return;
+      return true;
   }
+  throw std::logic_error("unknown event type");
 }
 
 }  // namespace llm_lab::serving

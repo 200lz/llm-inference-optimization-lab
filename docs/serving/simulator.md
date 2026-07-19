@@ -1,92 +1,81 @@
-# Phase S1 serving simulator
+# Phase S2 serving simulator
 
 ## Scope and responsibilities
 
-Phase S1 is a deterministic, single-active-request discrete-event simulator. It
-models request arrival, whole-prompt prefill, one-token decode steps, and request
-completion. It accepts several requests and uses an internal FIFO of arrived
-requests while allowing only one request to execute at a time. Phase S2 will
-replace this internal selection with a `Scheduler`; S1 intentionally has no
-scheduler interface or FCFS policy class.
+Phase S2 is a deterministic, single-active-request C++17 discrete-event
+simulator. It models arrivals, whole-prompt prefill, one-token decode steps,
+completion, and explicit cancellation. Admission is delegated to the formal
+`Scheduler` interface; the current policy is FCFS. See [scheduler](scheduler.md)
+for its API, ordering, statistics, and responsibility boundary.
 
-Public simulation timestamps are signed 64-bit integer microseconds and use the
-`_us` suffix. `SimulationClock` starts at zero, advances directly to event
-timestamps, and rejects backward movement. It never reads a wall clock or
-sleeps. These timestamps are modeled time, not measured llama.cpp, GPU, MN-Core,
-or other accelerator performance.
+Public timestamps are signed 64-bit integer microseconds with `_us` suffixes.
+`SimulationClock` starts at zero and jumps to event timestamps. It never reads a
+wall clock or sleeps. All output is simulated behavior, not measured llama.cpp,
+GPU, MN-Core, or other accelerator performance.
 
-The main components are:
+The components are:
 
 - `Request`: token counts, lifecycle state, and optional lifecycle timestamps.
 - `EventQueue`: stable timestamp/sequence ordering.
 - `SimulationClock`: monotonic simulated time.
-- `Backend`: deterministic prefill and decode-step cost estimates.
-- `SimulatedBackend`: checked integer linear cost model.
-- `SimulationEngine`: event processing, the S1 FIFO, and single-request
-  execution.
-
-Phase S1 stores only `prompt_token_count`; it does not store prompt token IDs.
+- `Backend` and `SimulatedBackend`: deterministic cost estimates.
+- `Scheduler` and `FcfsScheduler`: metadata-only admission policy.
+- `SimulationEngine`: requests, transitions, costs, events, clock, logging,
+  cancellation, and terminal failure.
 
 ## Request lifecycle
 
-The normal positive-output lifecycle is:
+The normal lifecycle is `Waiting -> Prefilling -> Decoding -> Finished`. A zero
+output limit legally transitions `Prefilling -> Finished` after prefill and has
+no first-token timestamp. Public cancellation adds `Waiting`, `Prefilling`, or
+`Decoding -> Cancelled`; cancellation sets `finish_time_us` to the current
+simulation clock. `Finished` and `Cancelled` are terminal. `Preempted` remains a
+reserved state with no operational support.
 
-`Waiting -> Prefilling -> Decoding -> Finished`
+Invalid transitions throw `std::logic_error`. Submissions must be pristine:
+`Waiting`, zero generated tokens, and no lifecycle timestamps. Backend lifetime
+protection is unchanged: the engine borrows a named backend lvalue, and the
+rvalue constructor is deleted.
 
-An output limit of zero completes immediately after prefill through the special
-legal transition `Prefilling -> Finished`. Its first-token timestamp remains
-unset. The full legal transition table is:
+## Events, timestamp boundaries, and stale policy
 
-| From | Legal destinations |
-| --- | --- |
-| `Waiting` | `Prefilling`, `Cancelled` |
-| `Prefilling` | `Decoding`, `Finished` for zero output, `Preempted`, `Cancelled` |
-| `Decoding` | `Finished`, `Preempted`, `Cancelled` |
-| `Preempted` | `Waiting`, `Cancelled` |
-| `Finished` | none |
-| `Cancelled` | none |
-
-All other transitions are illegal. `Request::transition_to` throws
-`std::logic_error` for an illegal transition. `Preempted` and `Cancelled` are
-reserved lifecycle states in Phase S1: `SimulationEngine` does not initiate
-these transitions, and their operational semantics will be added in later
-phases. Their presence in the enum and transition table must not be interpreted
-as implemented scheduling, cancellation, or preemption support.
-
-## Events and ordering
-
-The event types are `RequestArrival`, `PrefillComplete`,
-`DecodeStepComplete`, and `RequestComplete`. Each event contains
-`timestamp_us`, a monotonically assigned `event_sequence`, `request_id`, and
-its type.
-
-The queue key is exactly:
+Event types remain `RequestArrival`, `PrefillComplete`,
+`DecodeStepComplete`, and `RequestComplete`. The event queue key remains:
 
 1. `timestamp_us`
-2. `event_sequence`
+2. monotonically assigned `event_sequence`
 
-Sequence is assigned on insertion, so equal-timestamp events execute in
-insertion order. Event type, request ID, addresses, and container iteration
-never break ties. This S1 rule intentionally narrows the future priority-based
-semantics discussed in `architecture.md`; cancellation events are not present
-in S1.
+Equal-timestamp events therefore retain insertion order in the event log. The
+engine processes every event at the next timestamp before asking the scheduler
+for one admission. This preserves stable event semantics while ensuring all
+simultaneous arrivals participate in the scheduler's request-ID tie-break.
+`run_next_timestamp()` exposes this deterministic boundary for controlled
+stepping; `run()` repeats it to full drain.
 
-The engine records processed events in an append-only in-memory event log.
-Contradictory completion events are treated as duplicate or stale and rejected
-with `std::logic_error`. The public engine does not expose event injection, so a
-normal run cannot create such an event.
+`cancel_request()` is called externally between these timestamp boundaries. If
+cancellation frees the active slot while an arrival event remains at the
+current clock time, admission is deferred until all current-time events have
+been processed. Otherwise the next waiter is admitted immediately without
+advancing to the cancelled request's obsolete backend event. Because one call
+to `run_next_timestamp()` drains the whole timestamp, Phase S2 cannot express a
+cancellation event tied exactly against a completion at the same timestamp.
+That priority rule belongs to the future event model.
 
-`SimulationEngine` borrows its `Backend` from a named lvalue. The backend must
-outlive the engine; construction from an rvalue backend is rejected to prevent
-a dangling reference.
+Phase S2 narrows the former rule that every stale event is an error. Each
+request has at most one tracked outstanding lifecycle event. Explicit
+cancellation authorizes only that exact event sequence and type to be consumed
+without a state change. Its one-use authorization is then removed, the
+diagnostic `ignored_cancelled_event_count` is incremented, and the ignored event
+is excluded from the successful event log. This covers a future arrival after
+pre-arrival cancellation and the known backend event after active cancellation.
+No other stale event is ignored: a second or mismatched event, duplicate,
+unknown ID, corrupt ownership, or invalid transition still fails the engine.
 
-An exception during `run()` is terminal and deterministically marks the engine
-as failed. The event whose handling throws is not appended to the successful
-event log, and `run()` cannot be called again. Request records, the event log,
-and the simulation clock are unavailable after failure because they may contain
-partial state; their accessors throw `std::logic_error`. `failed()`,
-`processed_event_count()`, and `event_queue_empty()` remain available for
-failure diagnostics. Phase S1 does not attempt rollback or retry.
+An exception during execution terminally marks the engine failed. The event or
+timestamp admission whose processing throws is not appended to the successful
+event log. `run()` cannot be retried, and request, event-log, clock, and
+scheduler-result accessors are unavailable. `failed()`, processed event count,
+queue emptiness, and ignored-cancelled-event count remain diagnostic accessors.
 
 ## Simulated cost model
 
@@ -101,44 +90,27 @@ decode_step_us = decode_base_us
                + decode_per_active_sequence_us * active_sequence_count
 ```
 
-The S1 engine supplies an active batch/sequence count of one because it executes
-only one request. The backend API still accepts the counts explicitly to keep
-the estimate inputs visible. A count of zero is invalid. Negative configuration
-values fail during `SimulatedBackend` construction, and the engine calls backend
-validation again before accepting a run.
+Phase S2 always passes an active count of one. Configuration and event-time
+arithmetic is checked before evaluation. Negative durations are rejected and
+unrepresentable signed 64-bit results throw `std::overflow_error`.
 
-Every addition and multiplication in cost and event-time calculation is checked
-before evaluation. Unrepresentable counts or results throw
-`std::overflow_error`; signed overflow is never used as behavior. A backend that
-returns a negative duration is rejected with `std::logic_error`.
+## Edge cases and limitations
 
-## Edge-case policies
+- Arrival timestamps are non-negative; zero is valid.
+- Request IDs are unique per engine.
+- New submissions cannot precede the current simulated time.
+- Zero prompt and output lengths are valid.
+- Optional timestamps use no sentinel value.
+- The first decode completion alone assigns `first_token_time_us`.
+- Successful `run()` consumes meaningful and ignored-cancelled events and fully
+  drains the event queue.
+- `max_active_requests` is explicit, defaults to one, and must be positive;
+  Phase S2 supports exactly one and rejects a larger engine configuration.
+- Scheduler decisions carry a checked epoch. Admission commits only the current
+  epoch's deterministic FCFS head; stale or non-head commits are rejected before
+  mutation.
 
-- `arrival_time_us` must be non-negative; timestamp zero is valid.
-- Request IDs are explicit `RequestId` values and must be unique per engine.
-- A request submitted after time has advanced cannot have an arrival earlier
-  than the current simulated time.
-- Zero prompt tokens are valid and still incur configured base and active-count
-  prefill costs.
-- Zero output tokens are valid, finish after prefill, generate no decode event,
-  and leave `first_token_time_us` unset.
-- Optional lifecycle timestamps represent events that have not occurred; zero
-  is never a missing-value sentinel.
-- The first decode completion assigns `first_token_time_us`; later steps do not
-  change it.
-- Arrived requests enter FIFO order. Equal-time arrivals use submission/event
-  insertion order.
-- A request is never started before arrival. Finished and cancelled requests
-  cannot transition back to active states, and completion removes the active
-  request before another is selected.
-- A successful `run()` drains the event queue. Invalid or overflowing runs throw,
-  enter the terminal failed state, and make normal simulation results
-  unavailable.
-
-## Current limitations
-
-S1 has no threads, wall-clock timing, real model execution, workload parser,
-cancellation API, scheduler abstraction, scheduling budgets, continuous
-batching, KV-cache blocks, prefix caching, JSON/HTTP support, or llama.cpp
-integration. Costs are transparent analytical inputs used by a discrete-event
-run and must not be interpreted as hardware measurements.
+There are no threads, wall-clock timing, continuous batching, KV-cache blocks,
+prefix caching, preemption, JSON/HTTP, real model execution, llama.cpp adapter,
+or hardware measurements. These analytical costs drive a discrete-event
+simulation and must not be presented as measured performance.
