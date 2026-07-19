@@ -1,5 +1,7 @@
-# Characterizing and Optimizing CPU LLM Inference in llama.cpp
+# LLM Inference Optimization and Serving Engine Lab
 
+Reproducible llama.cpp CPU profiling, hot-path optimization,
+and deterministic LLM serving-engine simulation
 **Quantization, KV Cache, CPU Profiling, and Hot-Path Optimization**
 
 ## Overview
